@@ -1,24 +1,22 @@
 import logging
-from enum import StrEnum
+
+import httpx
 from rich import print
 
 from .schema import Element, WindowsShellSignal, uri
-from .soap import WinRmClient
+from .connection import Connection
 from .auth import kerberos, ntlm, basic
-
-class AuthStrategy(StrEnum):
-    GssApi = "gssapi"
 
 
 async def main() -> None:
     logging.basicConfig(
         format="%(levelname)s [%(asctime)s] %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.DEBUG
+        level=logging.DEBUG,
     )
 
-    conn = WinRmClient(
-        "127.0.0.1",
+    conn = Connection(
+        httpx.URL("http://127.0.0.1:5985"),
         auth=basic("Administrator", "password"),
     )
 

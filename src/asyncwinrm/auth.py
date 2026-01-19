@@ -20,7 +20,11 @@ def kerberos(username: str, password: str, *, realm: str) -> Auth:
     # TODO: doesn't quite work yet
     principal = f"{username}@{realm}"
     name = Name(base=principal, name_type=NameType.kerberos_principal)
-    res = acquire_cred_with_password(name, password.encode("utf-8"))#, mechs=[SPNEGO])
+    res = acquire_cred_with_password(
+        name,
+        password.encode("utf-8"),
+        # mechs=[SPNEGO],
+    )
     credentials = Credentials(res.creds)
     return HTTPSPNEGOAuth(
         mutual_authentication=REQUIRED,

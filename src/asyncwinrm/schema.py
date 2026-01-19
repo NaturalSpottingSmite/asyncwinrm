@@ -170,3 +170,6 @@ class CommandState:
 class CommandStateEvent:
     state: Optional[str]
     exit_code: Optional[int]
+
+
+type ReceiveEvent = StreamEvent | CommandStateEvent

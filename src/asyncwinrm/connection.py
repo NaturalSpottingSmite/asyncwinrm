@@ -1,7 +1,7 @@
 import uuid
 from base64 import b64decode, b64encode
 from contextlib import suppress
-from typing import Optional, Callable, Any, AsyncGenerator
+from typing import Optional, Callable, Any, AsyncGenerator, Collection
 
 import httpx
 from lxml import etree
@@ -17,6 +17,7 @@ from .schema import (
     CommandStateEvent,
     cim,
     Action,
+    ReceiveEvent,
 )
 
 type Builder = Optional[Callable[[etree._Element], None]]
@@ -170,10 +171,7 @@ def dictify(root: etree._Element) -> dict[str, Any]:
     return result
 
 
-type ReceiveEvent = StreamEvent | CommandStateEvent
-
-
-class WinRmClient:
+class Connection:
     """Low-level WinRM protocol client"""
 
     endpoint: httpx.URL
@@ -184,42 +182,14 @@ class WinRmClient:
 
     def __init__(
         self,
-        endpoint: str | httpx.URL,
-        auth: httpx.Auth,
+        endpoint: httpx.URL,
+        auth: Optional[httpx.Auth] = None,
         verify: bool = True,
-        locale: Optional[str] = "en-US",
-        timeout: Optional[int] = 60,
+        locale: Optional[str] = None,
+        timeout: Optional[int] = None,
     ):
         self.locale = locale
         self.timeout = timeout
-
-        if isinstance(endpoint, str):
-            # workaround for httpx not storing difference between "http://example.com" and "http://example.com/"
-            # (For the first case no path was specified, append /wsman. For the second case it's an explicit root path)
-            is_explicit_path = endpoint.endswith("/")
-
-            # we can't set the scheme after parsing because it gets parsed as a relative URL instead of as the host
-            if "://" not in endpoint:
-                endpoint = f"http://{endpoint}"
-
-            # workaround for httpx not storing the difference between http://example.com and http://example.com:80
-            is_explicit_port = ":80" in endpoint or ":443" in endpoint
-
-            # Parse the URL
-            endpoint = httpx.URL(endpoint)
-
-            # workaround httpx having port fallback to 80/443
-            if endpoint.port is None and not is_explicit_port:
-                if endpoint.scheme == "http":
-                    endpoint = httpx.URL(endpoint, port=5985)
-                elif endpoint.scheme == "https":
-                    endpoint = httpx.URL(endpoint, port=5986)
-
-            if endpoint.path == "/" and not is_explicit_path:
-                endpoint = httpx.URL(endpoint, path="/wsman")
-
-        if endpoint.username or endpoint.password:
-            raise ValueError("Please use auth=httpx.BasicAuth for basic auth")
 
         self.endpoint = endpoint
         self.http = httpx.AsyncClient(
@@ -326,7 +296,7 @@ class WinRmClient:
         )
 
     async def command_shell(
-        self, shell_id: str, command: str, arguments: Optional[list[str]] = None
+        self, shell_id: str, command: str, arguments: Optional[Collection[str]] = None
     ) -> dict[str, Any]:
         """Command a shell"""
 
