@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
 
-import httpx
 from lxml import etree
 
 WINDOWS_WSMAN_PREFIX = "http://schemas.microsoft.com/wbem/wsman/1"
@@ -20,10 +19,9 @@ class Namespace(StrEnum):
     WsEnumeration = "http://schemas.xmlsoap.org/ws/2004/09/enumeration"
     WsManagement = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"
 
-    WsMan = "https://schemas.microsoft.com/wbem/wsman/1/wsman.xsd"
-
-    # Not included by default
-    WindowsRemoteShell = f"{WINDOWS_WSMAN_PREFIX}/windows/shell"
+    # Not included in the global namespace map
+    # WsMan = "https://schemas.microsoft.com/wbem/wsman/1/wsman.xsd"
+    WindowsRemoteShell = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell"
 
     @classmethod
     def nsmap(cls) -> dict[str, str]:
@@ -142,15 +140,6 @@ type Action = WsTransferAction | WsEnumerationAction | WsEventingAction | WsMana
 class WindowsShellSignal(StrEnum):
     CtrlC = f"{Namespace.WindowsRemoteShell}/signal/ctrl_c"
     Terminate = f"{Namespace.WindowsRemoteShell}/signal/Terminate"
-
-
-def uri(*namespace: str) -> str:
-    url = httpx.URL(f"{WINDOWS_WSMAN_PREFIX}/{"/".join(namespace)}")
-    return str(url)
-
-
-def cim(*args: str) -> str:
-    return uri("wmi", "root", "cimv2", *args)
 
 
 @dataclass

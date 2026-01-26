@@ -1,45 +1,32 @@
 import logging
 
-import httpx
-from rich import print
-
-from .schema import Element, WindowsShellSignal, uri
 from .connection import Connection
-from .auth import kerberos, ntlm, basic
+from .auth.basic import basic
+from .exceptions import WinRMError, TransportError, ProtocolError, SOAPFaultError
 
 
 async def main() -> None:
-    logging.basicConfig(
-        format="%(levelname)s [%(asctime)s] %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.DEBUG,
-    )
+    # logging.basicConfig(
+    #     format="%(levelname)s [%(asctime)s] %(name)s - %(message)s",
+    #     datefmt="%Y-%m-%d %H:%M:%S",
+    #     level=logging.DEBUG,
+    # )
 
     conn = Connection(
-        httpx.URL("http://127.0.0.1:5985"),
+        "http://172.16.17.137:5985",
         auth=basic("Administrator", "password"),
     )
 
-    # res = await conn.get_service("sshd")
-    # print(res)
-
-    shell = await conn.create_shell()
-    print(shell)
-    command = await conn.command_shell(shell["ShellId"], "powershell.exe")
-    print(command)
+    shell = await conn.shell()
     try:
-        async for thing in conn.receive_shell(shell["ShellId"], command["CommandId"]):
-            print(thing)
-        await conn.send_shell(
-            shell["ShellId"], command["CommandId"], b"$PSVersionTable.PSVersion\r\n"
-        )
-        async for thing in conn.receive_shell(shell["ShellId"], command["CommandId"]):
-            print(thing)
-        await conn.send_shell(shell["ShellId"], command["CommandId"], b"exit\r\n")
-        async for thing in conn.receive_shell(shell["ShellId"], command["CommandId"]):
-            print(thing)
-        await conn.signal_shell(
-            shell["ShellId"], command["CommandId"], WindowsShellSignal.Terminate
-        )
+        proc = await shell.create_subprocess_exec("powershell.exe", "-NoLogo")
+        stdout, stderr = await proc.communicate(b"$PSVersionTable.PSVersion\r\nexit\r\n")
+        print(f"stdout: {stdout}")
+        print(f"stderr: {stderr}")
     finally:
-        await conn.delete_shell(shell["ShellId"])
+        await shell.destroy()
+
+
+__all__ = [
+    "Connection",
+]
