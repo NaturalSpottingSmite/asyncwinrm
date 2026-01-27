@@ -17,6 +17,9 @@ async def main() -> None:
         auth=basic("Administrator", "password"),
     )
 
+    id = await conn.identify()
+    print(id)
+
     shell = await conn.shell()
     try:
         proc = await shell.create_subprocess_exec("powershell.exe", "-NoLogo")

@@ -1,13 +1,10 @@
-import uuid
-from typing import Optional, Callable, AsyncGenerator
+from typing import Optional, AsyncGenerator
 
 import httpx
 from lxml import etree
 
 from .exceptions import SOAPFaultError, ProtocolError, TransportError
-from .protocol.soap import Element, Namespace, Attribute, WsTransferAction, Action
-
-type Builder = Optional[Callable[[etree._Element], None]]
+from .protocol.soap import Element, Namespace, WsTransferAction, Action, build_wsman_request, Builder
 
 
 class BaseConnection:
@@ -50,98 +47,8 @@ class BaseConnection:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.aclose()
 
-    def _build_request(
-        self,
-        *,
-        endpoint: str,
-        resource: str,
-        action: Action = WsTransferAction.Get,
-        selectors: Optional[dict[str, str]] = None,
-        options: Optional[dict[str, str]] = None,
-        body: Optional[Builder] = None,
-        message_id: str = f"urn:uuid:{uuid.uuid4()}",
-        locale: Optional[str] = "en-US",
-        timeout: Optional[int] = None,
-        max_size: Optional[int] = None,
-    ) -> bytes:
-        root = etree.Element(Element.Envelope, nsmap=Namespace.nsmap())
-
-        el_header = etree.SubElement(root, Element.Header)
-        etree.SubElement(el_header, Element.To).text = str(endpoint)
-
-        el_reply_to = etree.SubElement(el_header, Element.ReplyTo)
-        el_reply_to_address = etree.SubElement(el_reply_to, Element.Address)
-        el_reply_to_address.set(Attribute.MustUnderstand, "true")
-        el_reply_to_address.text = f"{Namespace.WsAddressing}/role/anonymous"
-
-        el_action = etree.SubElement(el_header, Element.Action)
-        el_action.set(Attribute.MustUnderstand, "true")
-        el_action.text = action
-
-        etree.SubElement(el_header, Element.MessageId).text = message_id
-
-        el_resource_uri = etree.SubElement(el_header, Element.ResourceUri)
-        el_resource_uri.set(Attribute.MustUnderstand, "true")
-        el_resource_uri.text = resource
-
-        if selectors:
-            el_selector_set = etree.SubElement(el_header, Element.SelectorSet)
-            for name, value in selectors.items():
-                el_selector = etree.SubElement(el_selector_set, Element.Selector)
-                el_selector.set("Name", name)
-                el_selector.text = value
-
-        if options:
-            el_option_set = etree.SubElement(el_header, Element.OptionSet)
-            el_option_set.set(Attribute.MustUnderstand, "true")
-            for name, value in options.items():
-                el_option = etree.SubElement(el_option_set, Element.Option)
-                el_option.set("Name", name)
-                el_option.text = value
-
-        if locale is not None:
-            el_locale = etree.SubElement(el_header, Element.Locale)
-            el_locale.set(Attribute.MustUnderstand, "false")
-            el_locale.set(Attribute.Lang, locale)
-
-        if timeout is not None:
-            assert timeout > 0
-            etree.SubElement(el_header, Element.OperationTimeout).text = f"PT{timeout}S"
-
-        if max_size is not None:
-            assert max_size > 0
-            el_max_envelope_size = etree.SubElement(el_header, Element.MaxEnvelopeSize)
-            el_max_envelope_size.set(Attribute.MustUnderstand, "true")
-            el_max_envelope_size.text = str(max_size)
-
-        el_body = etree.SubElement(root, Element.Body)
-        if body:
-            body(el_body)
-
-        return etree.tostring(root, xml_declaration=True, encoding="utf-8")
-
-    async def request_stream(
-        self,
-        *,
-        resource: str,
-        action: Action = WsTransferAction.Get,
-        selectors: Optional[dict[str, str]] = None,
-        options: Optional[dict[str, str]] = None,
-        body: Optional[Builder] = None,
-        timeout: Optional[int] = None,
-        max_size: Optional[int] = None,
-    ) -> AsyncGenerator[etree._Element, None]:
-        content = self._build_request(
-            endpoint=str(self.endpoint),
-            resource=resource,
-            action=action,
-            selectors=selectors,
-            options=options,
-            body=body,
-            locale=self.locale,
-            timeout=timeout or self.timeout,
-            max_size=max_size or self.max_envelope_size,
-        )
+    async def do_request(self, envelope: etree.Element) -> AsyncGenerator[etree.Element, None]:
+        content = etree.tostring(envelope, xml_declaration=True, encoding="utf-8")
 
         req = self.http.build_request("POST", "", content=content)
         try:
@@ -155,6 +62,33 @@ class BaseConnection:
         finally:
             await resp.aclose()
 
+
+    async def request_stream(
+        self,
+        *,
+        resource: str,
+        action: Action = WsTransferAction.Get,
+        selectors: Optional[dict[str, str]] = None,
+        options: Optional[dict[str, str]] = None,
+        body: Optional[Builder] = None,
+        timeout: Optional[int] = None,
+        max_size: Optional[int] = None,
+    ) -> AsyncGenerator[etree.Element, None]:
+        envelope = build_wsman_request(
+            endpoint=str(self.endpoint),
+            resource=resource,
+            action=action,
+            selectors=selectors,
+            options=options,
+            body=body,
+            locale=self.locale,
+            timeout=timeout or self.timeout,
+            max_size=max_size or self.max_envelope_size,
+        )
+
+        async for response in self.do_request(envelope):
+            yield response
+
     async def request(
         self,
         *,
@@ -165,7 +99,7 @@ class BaseConnection:
         body: Optional[Builder] = None,
         timeout: Optional[int] = None,
         max_size: Optional[int] = None,
-    ) -> etree._Element:
+    ) -> etree.Element:
         async for response in self.request_stream(
             resource=resource,
             action=action,
@@ -178,7 +112,7 @@ class BaseConnection:
             return response
         raise ProtocolError("No SOAP envelope received")
 
-    async def _parse_response_stream(self, resp: httpx.Response) -> AsyncGenerator[etree._Element, None]:
+    async def _parse_response_stream(self, resp: httpx.Response) -> AsyncGenerator[etree.Element, None]:
         parser = etree.XMLPullParser(events=("end",), tag=Element.Envelope)
         seen_envelope = False
 
@@ -205,7 +139,7 @@ class BaseConnection:
             raise TransportError(f"HTTP {resp.status_code}: {resp.reason_phrase}")
 
     @staticmethod
-    def _parse_fault(fault: etree._Element) -> SOAPFaultError:
+    def _parse_fault(fault: etree.Element) -> SOAPFaultError:
         reason = None
         code = None
 

@@ -204,7 +204,7 @@ class Shell:
         self.destroyed = True
 
     async def _command(self, command: str, arguments: Optional[Collection[str]] = None) -> str:
-        def _body(el_body: etree._Element) -> None:
+        def _body(el_body: etree.Element) -> None:
             el_cl = etree.SubElement(
                 el_body,
                 Element.CommandLine,
@@ -332,7 +332,7 @@ class Shell:
         return CompletedProcess(args=cmd, returncode=returncode, stdout=out, stderr=err)
 
     async def _get_events(self, command_id: str, *, stdout: bool, stderr: bool):
-        def _body(el_body: etree._Element) -> None:
+        def _body(el_body: etree.Element) -> None:
             el_receive = etree.SubElement(el_body, Element.Receive, nsmap={"rsp": Namespace.WindowsRemoteShell})
             el_desired_stream = etree.SubElement(el_receive, Element.DesiredStream)
             el_desired_stream.set("CommandId", command_id)
@@ -437,7 +437,7 @@ class Shell:
                 await stderr_sink.close()
 
     async def _send(self, command_id: str, data: bytes, *, end: bool = False) -> None:
-        def _body(el_body: etree._Element) -> None:
+        def _body(el_body: etree.Element) -> None:
             el_send = etree.SubElement(el_body, Element.Send, nsmap={"rsp": Namespace.WindowsRemoteShell})
             el_stream = etree.SubElement(el_send, Element.Stream)
             el_stream.set("CommandId", command_id)
@@ -455,7 +455,7 @@ class Shell:
         )
 
     async def _signal(self, command_id: str, signal: WindowsShellSignal) -> None:
-        def _body(el_body: etree._Element) -> None:
+        def _body(el_body: etree.Element) -> None:
             el_signal = etree.SubElement(el_body, Element.Signal, nsmap={"rsp": Namespace.WindowsRemoteShell})
             el_signal.set("CommandId", command_id)
             etree.SubElement(el_signal, Element.Code).text = signal

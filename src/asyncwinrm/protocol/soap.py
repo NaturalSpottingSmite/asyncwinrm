@@ -1,6 +1,7 @@
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional
+from typing import Optional, Callable
 
 from lxml import etree
 
@@ -20,6 +21,7 @@ class Namespace(StrEnum):
     WsManagement = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"
 
     # Not included in the global namespace map
+    WsManagementIdentity = "http://schemas.dmtf.org/wbem/wsman/identity/1/wsmanidentity.xsd"
     # WsMan = "https://schemas.microsoft.com/wbem/wsman/1/wsman.xsd"
     WindowsRemoteShell = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell"
 
@@ -69,6 +71,10 @@ class Element:
     OptionSet = etree.QName(Namespace.WsManagement, "OptionSet")
     Option = etree.QName(Namespace.WsManagement, "Option")
     OperationTimeout = etree.QName(Namespace.WsManagement, "OperationTimeout")
+
+    # WS-Management Identity
+    Identify = etree.QName(Namespace.WsManagementIdentity, "Identify")
+    IdentifyResponse = etree.QName(Namespace.WsManagementIdentity, "IdentifyResponse")
 
     # Windows Remote Shell
     Shell = etree.QName(Namespace.WindowsRemoteShell, "Shell")
@@ -162,3 +168,92 @@ class CommandStateEvent:
 
 
 type ReceiveEvent = StreamEvent | CommandStateEvent
+
+type Builder = Optional[Callable[[etree.Element], None]]
+
+
+def build_soap(
+    *,
+    nsmap: dict[str, str],
+    headers: Optional[Builder] = None,
+    body: Optional[Builder] = None,
+) -> etree.Element:
+    root = etree.Element(Element.Envelope, nsmap=nsmap)
+
+    el_header = etree.SubElement(root, Element.Header)
+    if headers:
+        headers(el_header)
+
+    el_body = etree.SubElement(root, Element.Body)
+    if body:
+        body(el_body)
+
+    return root
+
+
+def build_wsman_request(
+    *,
+    endpoint: str,
+    resource: str,
+    action: Action = WsTransferAction.Get,
+    selectors: Optional[dict[str, str]] = None,
+    options: Optional[dict[str, str]] = None,
+    body: Optional[Builder] = None,
+    message_id: str = f"urn:uuid:{uuid.uuid4()}",
+    locale: Optional[str] = "en-US",
+    timeout: Optional[int] = None,
+    max_size: Optional[int] = None,
+) -> etree.Element:
+    def _headers(el_header: etree.Element) -> None:
+        etree.SubElement(el_header, Element.To).text = str(endpoint)
+
+        el_reply_to = etree.SubElement(el_header, Element.ReplyTo)
+        el_reply_to_address = etree.SubElement(el_reply_to, Element.Address)
+        el_reply_to_address.set(Attribute.MustUnderstand, "true")
+        el_reply_to_address.text = f"{Namespace.WsAddressing}/role/anonymous"
+
+        el_action = etree.SubElement(el_header, Element.Action)
+        el_action.set(Attribute.MustUnderstand, "true")
+        el_action.text = action
+
+        etree.SubElement(el_header, Element.MessageId).text = message_id
+
+        el_resource_uri = etree.SubElement(el_header, Element.ResourceUri)
+        el_resource_uri.set(Attribute.MustUnderstand, "true")
+        el_resource_uri.text = resource
+
+        if selectors:
+            el_selector_set = etree.SubElement(el_header, Element.SelectorSet)
+            for name, value in selectors.items():
+                el_selector = etree.SubElement(el_selector_set, Element.Selector)
+                el_selector.set("Name", name)
+                el_selector.text = value
+
+        if options:
+            el_option_set = etree.SubElement(el_header, Element.OptionSet)
+            el_option_set.set(Attribute.MustUnderstand, "true")
+            for name, value in options.items():
+                el_option = etree.SubElement(el_option_set, Element.Option)
+                el_option.set("Name", name)
+                el_option.text = value
+
+        if locale is not None:
+            el_locale = etree.SubElement(el_header, Element.Locale)
+            el_locale.set(Attribute.MustUnderstand, "false")
+            el_locale.set(Attribute.Lang, locale)
+
+        if timeout is not None:
+            assert timeout > 0
+            etree.SubElement(el_header, Element.OperationTimeout).text = f"PT{timeout}S"
+
+        if max_size is not None:
+            assert max_size > 0
+            el_max_envelope_size = etree.SubElement(el_header, Element.MaxEnvelopeSize)
+            el_max_envelope_size.set(Attribute.MustUnderstand, "true")
+            el_max_envelope_size.text = str(max_size)
+
+    return build_soap(
+        nsmap=Namespace.nsmap(),
+        headers=_headers,
+        body=body,
+    )

@@ -16,7 +16,7 @@ from .protocol.soap import (
     WindowsShellSignal,
     StreamEvent,
     CommandStateEvent,
-    ReceiveEvent,
+    ReceiveEvent, build_soap,
 )
 from .protocol.resource import cim
 from .shell import Shell
@@ -34,7 +34,7 @@ def _dictify_coerce(text: Optional[str]) -> Any:
     return text
 
 
-def _dictify(root: etree._Element) -> dict[str, Any]:
+def _dictify(root: etree.Element) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for el in root:
         name = etree.QName(el).localname
@@ -92,6 +92,28 @@ class Connection(BaseConnection):
             max_envelope_size=max_envelope_size,
         )
 
+    async def identify(self) -> dict[str, Any]:
+        """Tests the connection and returns the remote server's version."""
+        def _headers(el_header: etree.Element) -> None:
+            pass
+
+        def _body(el_body: etree.Element) -> None:
+            etree.SubElement(el_body, Element.Identify)
+
+        envelope = build_soap(
+            nsmap={
+                "s": Namespace.Soap,
+                "wsmid": Namespace.WsManagementIdentity,
+            },
+            headers=_headers,
+            body=_body,
+        )
+
+        async for response in self.do_request(envelope):
+            return _dictify(response.find(Element.IdentifyResponse))
+
+        raise ProtocolError("No SOAP envelope received")
+
     async def get_operating_system(self) -> dict[str, Any]:
         """Get the remote operating system information."""
         body = await self.request(resource=cim("Win32_OperatingSystem"))
@@ -117,7 +139,7 @@ class Connection(BaseConnection):
         stderr: bool = True,
         lifetime: Optional[int] = None,
     ) -> Shell:
-        def _body(el_body: etree._Element) -> None:
+        def _body(el_body: etree.Element) -> None:
             el_shell = etree.SubElement(el_body, Element.Shell, nsmap={"rsp": Namespace.WindowsRemoteShell})
 
             if directory is not None:
