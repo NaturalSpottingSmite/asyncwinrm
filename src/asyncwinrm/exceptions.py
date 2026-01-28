@@ -1,3 +1,6 @@
+from typing import Optional
+
+
 class WinRMError(Exception):
     """Base class for WinRM errors."""
 
@@ -9,11 +12,16 @@ class TransportError(WinRMError):
 class ProtocolError(WinRMError):
     """Malformed or unexpected WS-Management response."""
 
+    # TODO: put XML here or make a new error
 
-class SOAPFaultError(WinRMError):
+
+class SoapFaultError(WinRMError):
     """SOAP fault response returned by the server."""
 
-    def __init__(self, reason: str, code: str | None = None) -> None:
-        self.reason = reason
+    code: Optional[str]
+    reason: Optional[str]
+
+    def __init__(self, code: Optional[str], reason: Optional[str]) -> None:
         self.code = code
-        super().__init__(reason if code is None else f"{reason} ({code})")
+        self.reason = reason
+        super().__init__(f"{reason or 'Unknown/generic SOAP fault'} ({code or 'no code'})")

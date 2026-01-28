@@ -6,24 +6,21 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import PurePath
 from subprocess import PIPE, STDOUT, DEVNULL
-from typing import Optional, IO, Union, Iterable, TYPE_CHECKING
+from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, cast
 
 from lxml import etree
 
 from .exceptions import ProtocolError
-from .protocol.soap import (
-    StreamEvent,
-    CommandStateEvent,
-    CommandState,
-    WindowsShellSignal,
-    Namespace,
+from .protocol.action import (
     WindowsShellAction,
-    Element,
     WsTransferAction,
 )
+from .protocol.shell import WindowsShellSignal, StreamEvent, CommandState, CommandStateEvent
+from .protocol.xml.element import RemoteShellElement
+from .protocol.xml.namespace import Namespace
 
 if TYPE_CHECKING:
-    from .connection import Connection
+    from .client.winrm import WinRmClient
 
 ProcessSource = Union[int, str, PurePath, asyncio.StreamReader, IO[bytes]]
 ProcessTarget = Union[int, str, PurePath, asyncio.StreamWriter, IO[bytes]]
@@ -185,20 +182,20 @@ class CompletedProcess:
 
 
 class Shell:
-    connection: "Connection"
+    client: "WinRmClient"
     id: str
     destroyed = False
 
-    def __init__(self, connection: "Connection", id: str) -> None:
-        self.connection = connection
+    def __init__(self, client: "WinRmClient", id: str) -> None:
+        self.client = client
         self.id = id
 
     async def destroy(self) -> None:
         if self.destroyed:
             raise RuntimeError("Shell has been destroyed")
-        await self.connection.request(
-            resource=f"{Namespace.WindowsRemoteShell}/cmd",
-            action=WsTransferAction.Delete,
+        await self.client.request(
+            WsTransferAction.Delete,
+            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
         )
         self.destroyed = True
@@ -207,24 +204,22 @@ class Shell:
         def _body(el_body: etree.Element) -> None:
             el_cl = etree.SubElement(
                 el_body,
-                Element.CommandLine,
+                RemoteShellElement.CommandLine,
                 nsmap={"rsp": Namespace.WindowsRemoteShell},
             )
-            etree.SubElement(el_cl, Element.Command).text = command
+            etree.SubElement(el_cl, RemoteShellElement.Command).text = command
             if arguments is not None:
                 for arg in arguments:
-                    etree.SubElement(el_cl, Element.Arguments).text = arg
+                    etree.SubElement(el_cl, RemoteShellElement.Arguments).text = arg
 
-        body = await self.connection.request(
-            resource=f"{Namespace.WindowsRemoteShell}/cmd",
-            action=WindowsShellAction.Command,
+        response = await self.client.request(
+            WindowsShellAction.Command,
+            _body,
+            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
-            body=_body,
+            data_element=RemoteShellElement.CommandResponse,
         )
-        el_command = body.find(Element.CommandResponse)
-        if el_command is None:
-            raise ProtocolError("Command response missing CommandResponse")
-        command_id = el_command.findtext(Element.CommandId)
+        command_id = response.data.findtext(RemoteShellElement.CommandId)
         if not command_id:
             raise ProtocolError("Command response missing CommandId")
         return command_id
@@ -333,8 +328,10 @@ class Shell:
 
     async def _get_events(self, command_id: str, *, stdout: bool, stderr: bool):
         def _body(el_body: etree.Element) -> None:
-            el_receive = etree.SubElement(el_body, Element.Receive, nsmap={"rsp": Namespace.WindowsRemoteShell})
-            el_desired_stream = etree.SubElement(el_receive, Element.DesiredStream)
+            el_receive = etree.SubElement(
+                el_body, RemoteShellElement.Receive, nsmap={"rsp": Namespace.WindowsRemoteShell}
+            )
+            el_desired_stream = etree.SubElement(el_receive, RemoteShellElement.DesiredStream)
             el_desired_stream.set("CommandId", command_id)
             desired_stream = ""
             if stdout:
@@ -343,32 +340,38 @@ class Shell:
                 desired_stream += " stderr"
             el_desired_stream.text = desired_stream.strip()
 
-        async for body in self.connection.request_stream(
-            resource=f"{Namespace.WindowsRemoteShell}/cmd",
-            action=WindowsShellAction.Receive,
+        response = await self.client.request(
+            WindowsShellAction.Receive,
+            _body,
+            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
-            body=_body,
-        ):
-            el_receive = body.find(Element.ReceiveResponse)
-            if el_receive is None:
-                continue
+            data_element=RemoteShellElement.ReceiveResponse,
+        )
+        el_receive = response.data
 
-            for el in el_receive:
-                if el.tag == Element.Stream:
-                    yield StreamEvent(
-                        stream=el.get("Name"),
-                        command_id=el.get("CommandId"),
-                        content=b64decode(el.text) if el.text else b"",
-                        finished=el.get("End") == "true",
-                    )
-                elif el.tag == Element.CommandState:
-                    el_exit_code = el.find(Element.ExitCode)
-                    yield CommandStateEvent(
-                        state=el.get("State"),
-                        exit_code=(int(el_exit_code.text) if el_exit_code is not None else None),
-                    )
-                else:
-                    raise ProtocolError(f"Unknown ReceiveResponse element: {el.tag}")
+        for el in el_receive:
+            if el.tag == RemoteShellElement.Stream:
+                stream_name: Optional[str] = el.get("Name")
+                stream_command_id: Optional[str] = el.get("CommandId")
+                if stream_name is None or stream_command_id is None:
+                    raise ProtocolError("ReceiveResponse stream missing Name or CommandId")
+                yield StreamEvent(
+                    stream=stream_name,
+                    command_id=stream_command_id,
+                    content=b64decode(el.text) if el.text else b"",
+                    finished=el.get("End") == "true",
+                )
+            elif el.tag == RemoteShellElement.CommandState:
+                el_exit_code = el.find(RemoteShellElement.ExitCode)
+                exit_code = None
+                if el_exit_code is not None and el_exit_code.text is not None:
+                    exit_code = int(el_exit_code.text)
+                yield CommandStateEvent(
+                    state=CommandState(el.get("State")),
+                    exit_code=exit_code,
+                )
+            else:
+                raise ProtocolError(f"Unknown ReceiveResponse element: {el.tag}")
 
     async def _receive_loop(
         self,
@@ -438,8 +441,8 @@ class Shell:
 
     async def _send(self, command_id: str, data: bytes, *, end: bool = False) -> None:
         def _body(el_body: etree.Element) -> None:
-            el_send = etree.SubElement(el_body, Element.Send, nsmap={"rsp": Namespace.WindowsRemoteShell})
-            el_stream = etree.SubElement(el_send, Element.Stream)
+            el_send = etree.SubElement(el_body, RemoteShellElement.Send, nsmap={"rsp": Namespace.WindowsRemoteShell})
+            el_stream = etree.SubElement(el_send, RemoteShellElement.Stream)
             el_stream.set("CommandId", command_id)
             el_stream.set("Name", "stdin")
             if end:
@@ -447,24 +450,26 @@ class Shell:
             if data:
                 el_stream.text = b64encode(data).decode("ascii")
 
-        await self.connection.request(
-            resource=f"{Namespace.WindowsRemoteShell}/cmd",
-            action=WindowsShellAction.Send,
+        await self.client.request(
+            WindowsShellAction.Send,
+            _body,
+            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
-            body=_body,
         )
 
     async def _signal(self, command_id: str, signal: WindowsShellSignal) -> None:
         def _body(el_body: etree.Element) -> None:
-            el_signal = etree.SubElement(el_body, Element.Signal, nsmap={"rsp": Namespace.WindowsRemoteShell})
+            el_signal = etree.SubElement(
+                el_body, RemoteShellElement.Signal, nsmap={"rsp": Namespace.WindowsRemoteShell}
+            )
             el_signal.set("CommandId", command_id)
-            etree.SubElement(el_signal, Element.Code).text = signal
+            etree.SubElement(el_signal, RemoteShellElement.Code).text = signal
 
-        await self.request(
-            resource=f"{Namespace.WindowsRemoteShell}/cmd",
-            action=WindowsShellAction.Signal,
+        await self.client.request(
+            WindowsShellAction.Signal,
+            _body,
+            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
-            body=_body,
         )
 
     async def _feed_stdin(self, command_id: str, source: ProcessSource) -> None:
@@ -484,7 +489,7 @@ class Shell:
         elif isinstance(source, (str, PurePath)):
             file_obj = open(source, "rb")
         elif hasattr(source, "read"):
-            file_obj = source
+            file_obj = cast(IO[bytes], source)
         else:
             raise TypeError("Unsupported stdin source type")
 

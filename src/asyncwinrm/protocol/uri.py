@@ -1,6 +1,4 @@
-import httpx
-
-from .soap import WINDOWS_WSMAN_PREFIX
+WINDOWS_WSMAN_PREFIX = "http://schemas.microsoft.com/wbem/wsman/1"
 
 
 def uri(*args: str) -> str:
@@ -10,8 +8,7 @@ def uri(*args: str) -> str:
     :param args: The components of the URI. They will be joined together with a "/" and appended to the following URL:
                  http://schemas.microsoft.com/wbem/wsman/1
     """
-    url = httpx.URL(f"{WINDOWS_WSMAN_PREFIX}/{"/".join(args)}")
-    return str(url)
+    return f"{WINDOWS_WSMAN_PREFIX}/{'/'.join(args)}"
 
 
 def cim(*args: str) -> str:
