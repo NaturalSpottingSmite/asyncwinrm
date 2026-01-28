@@ -1,5 +1,6 @@
 import asyncio
 import os
+import stat
 from base64 import b64encode, b64decode
 from collections.abc import Collection
 from contextlib import suppress
@@ -8,6 +9,7 @@ from pathlib import PurePath
 from subprocess import PIPE, STDOUT, DEVNULL
 from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, cast
 
+import httpx
 from lxml import etree
 
 from .exceptions import ProtocolError
@@ -389,35 +391,38 @@ class Shell:
 
         try:
             while not done:
-                async for event in self._get_events(
-                    command_id,
-                    stdout=stdout_reader is not None or stdout_sink is not None,
-                    stderr=stderr_reader is not None or stderr_sink is not None,
-                ):
-                    if isinstance(event, StreamEvent):
-                        if event.stream == "stdout":
-                            if stdout_reader is not None:
-                                stdout_reader.feed_data(event.content or b"")
-                            if stdout_sink is not None:
-                                await stdout_sink.write(event.content or b"")
-                            if event.finished:
-                                stdout_finished = True
+                try:
+                    async for event in self._get_events(
+                        command_id,
+                        stdout=stdout_reader is not None or stdout_sink is not None,
+                        stderr=stderr_reader is not None or stderr_sink is not None,
+                    ):
+                        if isinstance(event, StreamEvent):
+                            if event.stream == "stdout":
                                 if stdout_reader is not None:
-                                    stdout_reader.feed_eof()
-                        elif event.stream == "stderr":
-                            if stderr_reader is not None:
-                                stderr_reader.feed_data(event.content or b"")
-                            if stderr_sink is not None:
-                                await stderr_sink.write(event.content or b"")
-                            if event.finished:
-                                stderr_finished = True
+                                    stdout_reader.feed_data(event.content or b"")
+                                if stdout_sink is not None:
+                                    await stdout_sink.write(event.content or b"")
+                                if event.finished:
+                                    stdout_finished = True
+                                    if stdout_reader is not None:
+                                        stdout_reader.feed_eof()
+                            elif event.stream == "stderr":
                                 if stderr_reader is not None:
-                                    stderr_reader.feed_eof()
-                    elif isinstance(event, CommandStateEvent):
-                        if event.state == CommandState.Done:
-                            done = True
-                            returncode = event.exit_code or 0
-                            break
+                                    stderr_reader.feed_data(event.content or b"")
+                                if stderr_sink is not None:
+                                    await stderr_sink.write(event.content or b"")
+                                if event.finished:
+                                    stderr_finished = True
+                                    if stderr_reader is not None:
+                                        stderr_reader.feed_eof()
+                        elif isinstance(event, CommandStateEvent):
+                            if event.state == CommandState.Done:
+                                done = True
+                                returncode = event.exit_code or 0
+                                break
+                except httpx.TimeoutException:
+                    await asyncio.sleep(0.05)
 
                 if stdout_finished and stderr_finished:
                     done = True
@@ -475,30 +480,114 @@ class Shell:
     async def _feed_stdin(self, command_id: str, source: ProcessSource) -> None:
         if source in (PIPE, STDOUT, DEVNULL):
             raise ValueError("Invalid stdin source")
+        read_size = 65536
         if isinstance(source, asyncio.StreamReader):
             while True:
-                chunk = await source.read(32768)
+                chunk = await source.read(read_size)
                 if not chunk:
                     break
                 await self._send(command_id, chunk)
             await self._send(command_id, b"", end=True)
             return
 
+        fd: Optional[int] = None
         if isinstance(source, int) and source not in (PIPE, STDOUT, DEVNULL):
-            file_obj: IO[bytes] = os.fdopen(source, "rb", closefd=False)
+            fd = source
+            file_obj = os.fdopen(fd, "rb", closefd=False)
         elif isinstance(source, (str, PurePath)):
             file_obj = open(source, "rb")
         elif hasattr(source, "read"):
             file_obj = cast(IO[bytes], source)
+            try:
+                fd = file_obj.fileno()
+            except Exception:
+                fd = None
         else:
             raise TypeError("Unsupported stdin source type")
 
         try:
-            while True:
-                chunk = await asyncio.to_thread(file_obj.read, 32768)
-                if not chunk:
-                    break
-                await self._send(command_id, chunk)
+            use_reader = False
+            if fd is not None:
+                loop = asyncio.get_running_loop()
+                use_reader = hasattr(loop, "add_reader")
+                if use_reader:
+                    try:
+                        if stat.S_ISREG(os.fstat(fd).st_mode):
+                            use_reader = False
+                    except Exception:
+                        use_reader = False
+
+            if fd is not None and use_reader:
+                try:
+                    os.set_blocking(fd, False)
+                except Exception:
+                    pass
+
+                queue: asyncio.Queue[Optional[object]] = asyncio.Queue(maxsize=1)
+                reader_active = False
+
+                def _enable_reader() -> None:
+                    nonlocal reader_active
+                    if not reader_active:
+                        loop.add_reader(fd, _on_readable)
+                        reader_active = True
+
+                def _disable_reader() -> None:
+                    nonlocal reader_active
+                    if reader_active:
+                        with suppress(Exception):
+                            loop.remove_reader(fd)
+                        reader_active = False
+
+                def _on_readable() -> None:
+                    if queue.full():
+                        _disable_reader()
+                        return
+                    try:
+                        chunk = os.read(fd, read_size)
+                    except BlockingIOError:
+                        return
+                    except Exception as exc:
+                        _disable_reader()
+                        queue.put_nowait(exc)
+                        return
+                    if not chunk:
+                        _disable_reader()
+                        queue.put_nowait(None)
+                        return
+                    queue.put_nowait(chunk)
+                    if queue.full():
+                        _disable_reader()
+
+                _enable_reader()
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            break
+                        if isinstance(item, BaseException):
+                            raise item
+                        await self._send(command_id, cast(bytes, item))
+                        if not reader_active:
+                            _enable_reader()
+                finally:
+                    _disable_reader()
+            elif fd is not None:
+                while True:
+                    try:
+                        chunk = await asyncio.to_thread(os.read, fd, read_size)
+                    except BlockingIOError:
+                        await asyncio.sleep(0.01)
+                        continue
+                    if not chunk:
+                        break
+                    await self._send(command_id, chunk)
+            else:
+                while True:
+                    chunk = await asyncio.to_thread(file_obj.read, read_size)
+                    if not chunk:
+                        break
+                    await self._send(command_id, chunk)
         finally:
             with suppress(Exception):
                 if hasattr(file_obj, "close"):
