@@ -24,6 +24,10 @@ class WsAddressingElement:
     ReferenceParameters = etree.QName(Namespace.WsAddressing, "ReferenceParameters")
 
 
+class WsTransferElement:
+    ResourceCreated = etree.QName(Namespace.WsTransfer, "ResourceCreated")
+
+
 class WsManagementElement:
     ResourceUri = etree.QName(Namespace.WsManagement, "ResourceURI")
     MaxEnvelopeSize = etree.QName(Namespace.WsManagement, "MaxEnvelopeSize")
@@ -98,6 +102,7 @@ class CimElement:
 __all__ = [
     "SoapElement",
     "WsAddressingElement",
+    "WsTransferElement",
     "WsManagementElement",
     "WsManagementIdentityElement",
     "WsEnumerationElement",

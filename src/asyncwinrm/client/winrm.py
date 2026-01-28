@@ -10,7 +10,8 @@ from ..protocol.uri import cim
 from ..protocol.action import WsTransferAction
 from ..protocol.xml.attribute import XsiAttribute
 from ..shell import Shell
-from ..protocol.xml.element import CimElement, RemoteShellElement
+from ..protocol.xml.element import CimElement, RemoteShellElement, WsTransferElement, WsAddressingElement, \
+    WsManagementElement
 from ..protocol.xml.namespace import Namespace
 
 
@@ -141,14 +142,23 @@ class WinRmClient(WsManagementClient):
             WsTransferAction.Create,
             body,
             resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
-            data_element=RemoteShellElement.Shell,
+            data_element=WsTransferElement.ResourceCreated,
         )
 
-        shell_id = response.data.findtext(RemoteShellElement.ShellId)
-        if not shell_id:
-            raise ProtocolError("CreateShell response missing ShellId")
+        el_reference_parameters = response.data.find(WsAddressingElement.ReferenceParameters)
+        if el_reference_parameters is None:
+            raise ProtocolError("CreateShell response missing ReferenceParameters")
 
-        return Shell(client=self, id=shell_id)
+        el_selector_set = el_reference_parameters.find(WsManagementElement.SelectorSet)
+        if el_selector_set is None:
+            raise ProtocolError("CreateShell response missing SelectorSet")
+
+        for el_selector in el_selector_set.findall(WsManagementElement.Selector):
+            if el_selector.get("Name") != "ShellId":
+                continue
+            return Shell(client=self, id=el_selector.text)
+
+        raise ProtocolError("CreateShell response missing ShellId")
 
 
 __all__ = ["WinRmClient"]
