@@ -20,6 +20,7 @@ from ..protocol.xml.element import (
 )
 from ..protocol.xml.namespace import Namespace
 from ..registry import Registry
+from ..services import Services
 
 
 def _dictify_coerce(text: Optional[str]) -> Any:
@@ -151,11 +152,14 @@ class WinRMClient(WSManagementClient):
         """Get the remote operating system information."""
         return await self.get_cim_object(CIMElement.OperatingSystem)
 
-    async def get_service(self, name: str) -> dict[str, Any]:
-        """Get a service by name."""
-        return await self.get_cim_object(CIMElement.Service, name=name)
-
-    async def invoke_wmi(self, resource_uri: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def invoke_wmi(
+        self,
+        resource_uri: str,
+        method: str,
+        params: dict[str, Any],
+        *,
+        selectors: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
         """
         Invoke a WMI method and return parsed output.
 
@@ -177,6 +181,7 @@ class WinRMClient(WSManagementClient):
             f"{resource_uri}/{method}",
             body,
             resource_uri=resource_uri,
+            selectors=selectors,
             data_element=WMIElement.method_output(resource_uri, method),
         )
         output = _parse_wmi_output(response.data)
@@ -250,6 +255,11 @@ class WinRMClient(WSManagementClient):
     def registry(self) -> Registry:
         """Returns a registry client."""
         return Registry(self)
+
+    @property
+    def services(self) -> Services:
+        """Returns a services client."""
+        return Services(self)
 
 
 __all__ = ["WinRMClient"]

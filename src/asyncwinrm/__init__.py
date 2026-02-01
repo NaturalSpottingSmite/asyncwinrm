@@ -7,6 +7,7 @@ from .registry import (
     RegistryValueInfo,
     RegistryValueType,
 )
+from .services import Service, Services, ServiceStartType, ServiceState
 
 __all__ = [
     "WinRMClient",
@@ -16,4 +17,8 @@ __all__ = [
     "RegistryKey",
     "RegistryValueInfo",
     "RegistryValueType",
+    "Service",
+    "Services",
+    "ServiceStartType",
+    "ServiceState",
 ]

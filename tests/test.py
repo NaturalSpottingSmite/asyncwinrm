@@ -6,6 +6,7 @@ from contextlib import suppress
 
 from asyncwinrm.auth.spnego import negotiate, kerberos
 from asyncwinrm.client.winrm import WinRMClient
+from asyncwinrm.services import Service, ServiceState
 
 
 def _get_client():
@@ -46,11 +47,6 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
         self.assertIsNotNone(response.product_version)
         self.assertIsNotNone(response.product_vendor)
-
-    async def testGetService(self):
-        service = await self.client.get_service("LanmanWorkstation")
-        self.assertEqual(service["Name"], "LanmanWorkstation")
-        self.assertIn("svchost.exe", service["PathName"])
 
     async def testShell(self):
         shell = await self.client.shell()
@@ -122,3 +118,31 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
                     await child.delete()
             with suppress(Exception):
                 await parent.delete()
+
+    async def testServices(self):
+        # Basic get / get_all
+        service = await self.client.services.get("Spooler")
+        self.assertIsInstance(service, Service)
+        self.assertEqual(service.name, "Spooler")
+        self.assertIsNotNone(service.display_name)
+
+        services = await self.client.services.get_all()
+        self.assertTrue(any(s.name == "Spooler" for s in services))
+
+        # Start/stop and verify status changes (Spooler is non-essential)
+        initial_status = await service.get_status()
+        self.assertIn(initial_status, (ServiceState.Running, ServiceState.Stopped, ServiceState.Paused))
+
+        await service.stop()
+        for _ in range(25):  # up to 5s
+            if await service.get_status() == ServiceState.Stopped:
+                break
+            await asyncio.sleep(0.2)
+        self.assertEqual(await service.get_status(), ServiceState.Stopped)
+
+        await service.start()
+        for _ in range(25):  # up to 5s
+            if await service.get_status() == ServiceState.Running:
+                break
+            await asyncio.sleep(0.2)
+        self.assertEqual(await service.get_status(), ServiceState.Running)

@@ -52,6 +52,9 @@ class RegistryValueInfo:
     name: str
     value_type: Optional[RegistryValueType]
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.name!r}, {self.value_type!r})"
+
 
 class Registry:
     def __init__(self, client: "WinRMClient"):
@@ -98,6 +101,9 @@ class RegistryTree:
     registry: Registry
     tree: Tree
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.tree!r})"
+
     def key(self, path: str) -> "RegistryKey":
         """
         Creates and returns a new RegistryKey accessor corresponding to a key in this tree.
@@ -123,6 +129,9 @@ class RegistryKey:
     registry: Registry
     tree: Tree
     path: str
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.tree!r}, {self.path!r})"
 
     def _child_path(self, subkey: str) -> str:
         if not self.path:
