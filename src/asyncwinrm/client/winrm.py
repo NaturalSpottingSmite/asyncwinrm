@@ -16,8 +16,10 @@ from ..protocol.xml.element import (
     WSTransferElement,
     WSAddressingElement,
     WSManagementElement,
+    WMIElement,
 )
 from ..protocol.xml.namespace import Namespace
+from ..registry import Registry
 
 
 def _dictify_coerce(text: Optional[str]) -> Any:
@@ -30,6 +32,43 @@ def _dictify_coerce(text: Optional[str]) -> Any:
     with suppress(ValueError):
         return int(text)
     return text
+
+
+def _coerce_wmi_text(text: Optional[str]) -> Any:
+    if text is None:
+        return None
+    if text == "false":
+        return False
+    if text == "true":
+        return True
+    with suppress(ValueError):
+        return int(text)
+    return text
+
+
+def _parse_wmi_value(el: etree.Element) -> Any:
+    if len(el):
+        return [_coerce_wmi_text(child.text) for child in el]
+    return _coerce_wmi_text(el.text)
+
+
+def _parse_wmi_output(el: etree.Element) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for child in el:
+        name = etree.QName(child).localname
+        value = _parse_wmi_value(child)
+        if name in result:
+            existing = result[name]
+            if not isinstance(existing, list):
+                existing = [existing]
+            if isinstance(value, list):
+                existing.extend(value)
+            else:
+                existing.append(value)
+            result[name] = existing
+        else:
+            result[name] = value
+    return result
 
 
 def dictify(root: etree.Element) -> dict[str, Any]:
@@ -116,6 +155,38 @@ class WinRMClient(WSManagementClient):
         """Get a service by name."""
         return await self.get_cim_object(CIMElement.Service, name=name)
 
+    async def invoke_wmi(self, resource_uri: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        Invoke a WMI method and return parsed output.
+
+        :param resource_uri: WMI resource URI for the class (e.g. wmi/root/default/StdRegProv)
+        :param method: Method name to invoke (e.g. EnumKey)
+        :param params: WMI method input parameters
+        """
+        body = etree.Element(WMIElement.method_input(resource_uri, method), nsmap={"p": resource_uri})
+        for key, value in params.items():
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    child = etree.SubElement(body, etree.QName(resource_uri, key))
+                    child.text = str(item)
+            else:
+                child = etree.SubElement(body, etree.QName(resource_uri, key))
+                child.text = str(value)
+
+        response = await self.request(
+            f"{resource_uri}/{method}",
+            body,
+            resource_uri=resource_uri,
+            data_element=WMIElement.method_output(resource_uri, method),
+        )
+        output = _parse_wmi_output(response.data)
+        return_value = output.get("ReturnValue")
+        if return_value is None:
+            return_value = output.get("uReturnValue")
+        if return_value is not None and int(return_value) != 0:
+            raise ProtocolError(f"WMI {method} failed with error {return_value}")
+        return output
+
     async def shell(
         self,
         directory: Optional[str] = None,
@@ -174,6 +245,11 @@ class WinRMClient(WSManagementClient):
             return Shell(client=self, id=el_selector.text)
 
         raise ProtocolError("CreateShell response missing ShellId")
+
+    @property
+    def registry(self) -> Registry:
+        """Returns a registry client."""
+        return Registry(self)
 
 
 __all__ = ["WinRMClient"]

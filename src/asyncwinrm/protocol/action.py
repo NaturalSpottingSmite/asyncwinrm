@@ -32,12 +32,9 @@ class WindowsShellAction(StrEnum):
     Signal = f"{Namespace.WindowsRemoteShell}/Signal"
 
 
-type Action = WSTransferAction | WSEnumerationAction | WSEventingAction | WindowsShellAction
-
 __all__ = [
     "WSTransferAction",
     "WSEnumerationAction",
     "WSEventingAction",
     "WindowsShellAction",
-    "Action",
 ]

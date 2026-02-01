@@ -9,7 +9,7 @@ from lxml import etree
 
 from .soap import SOAPClient, SOAPEnvelope, SOAPResponse
 from ..exceptions import ProtocolError
-from ..protocol.action import Action, WSTransferAction, WSEnumerationAction
+from ..protocol.action import WSTransferAction, WSEnumerationAction
 from ..protocol.xml.element import (
     WSAddressingElement,
     WSManagementElement,
@@ -359,7 +359,7 @@ class WSManagementClient:
 
     def build_request(
         self,
-        action: Action,
+        action: str,
         body: Optional[etree.Element | Builder] = None,
         *,
         resource_uri: Optional[str] = None,
@@ -433,7 +433,7 @@ class WSManagementClient:
 
     async def request(
         self,
-        action: Action,
+        action: str,
         body: Optional[etree.Element | Builder] = None,
         *,
         data_element: Optional[etree.QName] = None,

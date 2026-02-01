@@ -1,6 +1,8 @@
+import asyncio
 import os
 import socket
 import unittest
+from contextlib import suppress
 
 from asyncwinrm.auth.spnego import negotiate, kerberos
 from asyncwinrm.client.winrm import WinRMClient
@@ -32,6 +34,13 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.client = _get_client()
 
+    async def asyncSetUp(self) -> None:
+        loop = asyncio.get_running_loop()
+        loop.set_debug(False)
+
+    async def asyncTearDown(self):
+        await self.client.close()
+
     async def testIdentify(self):
         response = await self.client.identify()
         self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
@@ -56,3 +65,60 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(proc.returncode)
         finally:
             await shell.destroy()
+
+    async def testRegistry(self):
+        key = self.client.registry.hklm.key(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        product = await key.get_string("ProductName")
+        self.assertIsInstance(product, str)
+
+        parent = self.client.registry.hkcu.key(r"Software\AsyncWinRMTest")
+        await parent.create()
+        child = None
+        expected_value_names = {
+            "TestValue",
+            "TestValue64",
+            "TestString",
+            "TestExpand",
+            "TestMulti",
+            "TestBinary",
+        }
+
+        try:
+            child = parent.key("Child")
+            await child.create()
+            await parent.set_dword("TestValue", 42)
+            await parent.set_qword("TestValue64", 2**40)
+            await parent.set_string("TestString", "hello")
+            await parent.set_expand_string("TestExpand", r"%SystemRoot%\System32")
+            await parent.set_multi_string("TestMulti", ["one", "two"])
+            await parent.set_binary("TestBinary", b"\x00\x01\xfe")
+
+            self.assertEqual(await parent.get_dword("TestValue"), 42)
+            self.assertEqual(await parent.get_qword("TestValue64"), 2**40)
+            self.assertEqual(await parent.get_string("TestString"), "hello")
+            # self.assertIsInstance(await parent.get_expand_string("TestExpand"), str)
+            self.assertEqual(await parent.get_expand_string("TestExpand"), r"C:\Windows\System32")
+            self.assertEqual(await parent.get_multi_string("TestMulti"), ["one", "two"])
+            self.assertEqual(await parent.get_binary("TestBinary"), b"\x00\x01\xfe")
+
+            values = await parent.list_values()
+            value_names = {value.name for value in values}
+            self.assertEqual(value_names, expected_value_names)
+
+            async with parent as values_view:
+                self.assertEqual(values_view["TestValue"], 42)
+                self.assertEqual(values_view["TestString"], "hello")
+                with self.assertRaises(TypeError):
+                    values_view["TestValue"] = 7  # ty: ignore[invalid-assignment]
+
+            subkeys = await parent.list_subkeys()
+            self.assertIn("Child", subkeys)
+
+            for name in expected_value_names:
+                await parent.delete_value(name)
+        finally:
+            if child is not None:
+                with suppress(Exception):
+                    await child.delete()
+            with suppress(Exception):
+                await parent.delete()

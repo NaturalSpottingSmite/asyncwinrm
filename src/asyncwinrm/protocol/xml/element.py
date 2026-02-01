@@ -99,6 +99,20 @@ class CIMElement:
     Service = _make_cim_element("Win32_Service")
 
 
+def _make_wmi_method_element(namespace: str, method: str, suffix: str) -> etree.QName:
+    return etree.QName(namespace, f"{method}_{suffix}")
+
+
+class WMIElement:
+    @staticmethod
+    def method_input(namespace: str, method: str) -> etree.QName:
+        return _make_wmi_method_element(namespace, method, "INPUT")
+
+    @staticmethod
+    def method_output(namespace: str, method: str) -> etree.QName:
+        return _make_wmi_method_element(namespace, method, "OUTPUT")
+
+
 __all__ = [
     "SOAPElement",
     "WSAddressingElement",
@@ -108,4 +122,5 @@ __all__ = [
     "WSEnumerationElement",
     "RemoteShellElement",
     "CIMElement",
+    "WMIElement",
 ]
