@@ -10,6 +10,7 @@
   # check phase
   ruff,
   ty,
+  types-lxml,
 
   withKerberos ? false,
   gssapi,
@@ -45,6 +46,7 @@ buildPythonPackage {
   nativeCheckInputs = [
     ruff
     ty
+    types-lxml
   ];
 
   checkPhase = ''

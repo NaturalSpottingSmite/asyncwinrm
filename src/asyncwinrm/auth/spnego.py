@@ -27,7 +27,7 @@ class SPNEGOAuth(Auth):
     _lock: threading.Lock
     _async_lock: asyncio.Lock
 
-    _context: Optional[spnego.ContextProxy]
+    _context: spnego.ContextProxy
 
     def __init__(
         self,

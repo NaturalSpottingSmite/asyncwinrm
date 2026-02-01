@@ -49,8 +49,10 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
             proc = await shell.create_subprocess_exec("cmd.exe", "/c", "ver")
             stdout, stderr = await proc.communicate()
             await proc.wait()
-            self.assertIn("Microsoft Windows", stdout.decode())
-            self.assertFalse(stderr.decode())
+            decoded_stdout = stdout.decode() if stdout is not None else ""
+            decoded_stderr = stderr.decode() if stderr is not None else ""
+            self.assertIn("Microsoft Windows", decoded_stdout)
+            self.assertEqual(decoded_stderr, "")
             self.assertIsNone(proc.returncode)
         finally:
             await shell.destroy()

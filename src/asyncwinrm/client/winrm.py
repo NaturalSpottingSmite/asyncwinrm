@@ -169,6 +169,8 @@ class WinRMClient(WSManagementClient):
         for el_selector in el_selector_set.findall(WSManagementElement.Selector):
             if el_selector.get("Name") != "ShellId":
                 continue
+            if not el_selector.text:
+                raise ProtocolError("CreateShell has an empty ShellId")
             return Shell(client=self, id=el_selector.text)
 
         raise ProtocolError("CreateShell response missing ShellId")

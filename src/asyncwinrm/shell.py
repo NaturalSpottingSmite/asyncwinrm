@@ -7,7 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import PurePath
 from subprocess import PIPE, STDOUT, DEVNULL
-from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, cast
+from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, Callable, cast
 
 import httpx
 from lxml import etree
@@ -45,7 +45,7 @@ class _OutputSink:
             self._file = target  # type: ignore[assignment]
 
     async def write(self, data: bytes) -> None:
-        if not data:
+        if len(data) == 0:
             return
         if self._writer is not None:
             self._writer.write(data)
@@ -55,7 +55,8 @@ class _OutputSink:
             await asyncio.to_thread(os.write, self._fd, data)
             return
         if self._file is not None:
-            await asyncio.to_thread(self._file.write, data)
+            writer = cast(Callable[[bytes], int], self._file.write)
+            await asyncio.to_thread(writer, data)
             await asyncio.to_thread(self._file.flush)
 
     async def close(self) -> None:
