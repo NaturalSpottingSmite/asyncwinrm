@@ -1,5 +1,5 @@
 from .client.winrm import WinRMClient
-from .registry import (
+from asyncwinrm.wmi.registry import (
     Registry,
     RegistryTree,
     Tree,
@@ -7,7 +7,7 @@ from .registry import (
     RegistryValueInfo,
     RegistryValueType,
 )
-from .services import Service, Services, ServiceStartType, ServiceState
+from asyncwinrm.wmi.services import Service, Services, ServiceStartType, ServiceState
 
 __all__ = [
     "WinRMClient",

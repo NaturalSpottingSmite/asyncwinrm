@@ -4,10 +4,10 @@ from enum import IntEnum
 from types import MappingProxyType
 from typing import Optional, Sequence, Any, TYPE_CHECKING
 
-from .protocol.uri import wmi
+from ..protocol.uri import wmi
 
 if TYPE_CHECKING:
-    from .client.winrm import WinRMClient
+    from ..client.winrm import WinRMClient
 
 _REGISTRY_URI = wmi("StdRegProv")
 

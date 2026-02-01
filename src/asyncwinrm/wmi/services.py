@@ -6,12 +6,12 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from lxml import etree
 
-from .protocol.uri import cim
-from .protocol.xml.element import CIMElement
-from .protocol.xml.attribute import XSIAttribute
+from ..protocol.uri import cim
+from ..protocol.xml.attribute import XSIAttribute
+from ..protocol.xml.element import CIMElement
 
 if TYPE_CHECKING:
-    from .client.winrm import WinRMClient
+    from ..client.winrm import WinRMClient
 
 _SERVICE_URI = cim("Win32_Service")
 
@@ -112,11 +112,11 @@ class ServiceState(str, Enum):
     """Win32_Service State values"""
 
     Stopped = "Stopped"
-    Start_Pending = "Start Pending"
-    Stop_Pending = "Stop Pending"
+    StartPending = "Start Pending"
+    StopPending = "Stop Pending"
     Running = "Running"
-    Continue_Pending = "Continue Pending"
-    Pause_Pending = "Pause Pending"
+    ContinuePending = "Continue Pending"
+    PausePending = "Pause Pending"
     Paused = "Paused"
 
     @classmethod

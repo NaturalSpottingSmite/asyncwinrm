@@ -27,8 +27,6 @@ class SPNEGOAuth(Auth):
     _lock: threading.Lock
     _async_lock: asyncio.Lock
 
-    _context: spnego.ContextProxy
-
     def __init__(
         self,
         username: str,
@@ -45,7 +43,9 @@ class SPNEGOAuth(Auth):
         self.service = service
         self._lock = threading.Lock()
         self._async_lock = asyncio.Lock()
-        self._context = spnego.client(
+
+    def _get_context(self) -> spnego.ContextProxy:
+        return spnego.client(
             self.username,
             self.password,
             hostname=self.hostname,
@@ -93,40 +93,32 @@ class SPNEGOAuth(Auth):
         )
 
     def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
+        context = self._get_context()
         with self._lock:
-            out_token = self._context.step()
-            if out_token is not None:
-                self._set_auth_header(request, out_token)
-            response = yield request
-            while not self._context.complete:
-                in_token = self._decode_header(response)
-                if in_token is None:
-                    break
-                response.read()
-                out_token = self._context.step(in_token)
+            in_token: bytes | None = None
+            while not context.complete:
+                out_token = context.step(in_token)
                 if out_token is None:
                     break
-                request = self._clone_request(response.request)
-                self._set_auth_header(request, out_token)
                 response = yield request
+                in_token = self._decode_header(response)
+                response.read()
+                if in_token is None:
+                    break
 
     async def async_auth_flow(self, request: Request) -> AsyncGenerator[Request, Response]:
+        context = self._get_context()
         async with self._async_lock:
-            out_token = self._context.step()
-            if out_token is not None:
-                self._set_auth_header(request, out_token)
-            response = yield request
-            while not self._context.complete:
-                in_token = self._decode_header(response)
-                if in_token is None:
-                    break
-                await response.aread()
-                out_token = self._context.step(in_token)
+            in_token: bytes | None = None
+            while not context.complete:
+                out_token = context.step(in_token)
                 if out_token is None:
                     break
-                request = self._clone_request(response.request)
-                self._set_auth_header(request, out_token)
                 response = yield request
+                in_token = self._decode_header(response)
+                await response.aread()
+                if in_token is None:
+                    break
 
 
 class SPNEGOEncryptedAuth(SPNEGOAuth):
@@ -145,10 +137,11 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
         return self._clone_request_with_content(request, encrypted_body, headers=headers)
 
     def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
+        context = self._get_context()
         with self._lock:
             in_token: bytes | None = None
-            while not self._context.complete:
-                out_token = self._context.step(in_token)
+            while not context.complete:
+                out_token = context.step(in_token)
                 if out_token is None:
                     break
                 response = yield self._build_preflight_request(request, out_token)
@@ -157,17 +150,18 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
                 if in_token is None:
                     break
 
-            encrypted_request = self._build_encrypted_request(request, self._context)
+            encrypted_request = self._build_encrypted_request(request, context)
             response = yield encrypted_request
             content = response.read()
-            decrypted = decrypt_response_content(self._context, content, response.headers.get("Content-Type", ""))
+            decrypted = decrypt_response_content(context, content, response.headers.get("Content-Type", ""))
             response._content = decrypted
 
     async def async_auth_flow(self, request: Request) -> AsyncGenerator[Request, Response]:
+        context = self._get_context()
         async with self._async_lock:
             in_token: bytes | None = None
-            while not self._context.complete:
-                out_token = self._context.step(in_token)
+            while not context.complete:
+                out_token = context.step(in_token)
                 if out_token is None:
                     break
                 response = yield self._build_preflight_request(request, out_token)
@@ -176,10 +170,10 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
                 if in_token is None:
                     break
 
-            encrypted_request = self._build_encrypted_request(request, self._context)
+            encrypted_request = self._build_encrypted_request(request, context)
             response = yield encrypted_request
             content = await response.aread()
-            decrypted = decrypt_response_content(self._context, content, response.headers.get("Content-Type", ""))
+            decrypted = decrypt_response_content(context, content, response.headers.get("Content-Type", ""))
             response._content = decrypted
 
 
@@ -218,7 +212,7 @@ def _write_krb5_conf(realm: str, address: str) -> str:
         [domain_realm]
         .{realm_lower} = {realm_upper}
         {realm_lower} = {realm_upper}
-    """
+    """,
     )
     temp = tempfile.NamedTemporaryFile(prefix="krb5.", suffix=".conf", delete=False)
     temp.write(content.encode("utf-8"))

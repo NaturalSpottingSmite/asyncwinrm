@@ -6,7 +6,7 @@ from contextlib import suppress
 
 from asyncwinrm.auth.spnego import negotiate, kerberos
 from asyncwinrm.client.winrm import WinRMClient
-from asyncwinrm.services import Service, ServiceState
+from asyncwinrm.wmi.services import Service, ServiceState
 
 
 def _get_client():
@@ -47,6 +47,13 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
         self.assertIsNotNone(response.product_version)
         self.assertIsNotNone(response.product_vendor)
+
+    async def testReauth(self):
+        response = await self.client.identify()
+        self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
+        await asyncio.sleep(15)
+        response = await self.client.identify()
+        self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
 
     async def testShell(self):
         shell = await self.client.shell()

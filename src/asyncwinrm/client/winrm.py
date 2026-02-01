@@ -19,8 +19,8 @@ from ..protocol.xml.element import (
     WMIElement,
 )
 from ..protocol.xml.namespace import Namespace
-from ..registry import Registry
-from ..services import Services
+from asyncwinrm.wmi.registry import Registry
+from asyncwinrm.wmi.services import Services
 
 
 def _dictify_coerce(text: Optional[str]) -> Any:
