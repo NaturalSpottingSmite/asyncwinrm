@@ -15,7 +15,7 @@ class ProtocolError(WinRMError):
     # TODO: put XML here or make a new error
 
 
-class SoapFaultError(WinRMError):
+class SOAPFaultError(WinRMError):
     """SOAP fault response returned by the server."""
 
     code: Optional[str]
@@ -25,3 +25,7 @@ class SoapFaultError(WinRMError):
         self.code = code
         self.reason = reason
         super().__init__(f"{reason or 'Unknown/generic SOAP fault'} ({code or 'no code'})")
+
+
+class EncryptionError(WinRMError):
+    """WinRM message encryption error."""

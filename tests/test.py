@@ -1,14 +1,56 @@
 import os
+import socket
 import unittest
+
+from asyncwinrm.auth.spnego import negotiate, kerberos
+from asyncwinrm.client.winrm import WinRMClient
+
+
+def _get_client():
+    endpoint = os.getenv("WINRM_ENDPOINT", "172.16.17.137")
+    method = os.getenv("WINRM_AUTH_METHOD", "negotiate")
+
+    username = os.getenv("WINRM_AUTH_USERNAME", "Administrator")
+    password = os.getenv("WINRM_AUTH_PASSWORD", "password")
+
+    if method == "kerberos":
+        realm = os.getenv("WINRM_AUTH_REALM", "")
+        address = os.getenv("WINRM_AUTH_ADDRESS", "127.0.0.1")
+        hostname = os.getenv("WINRM_AUTH_HOSTNAME", socket.gethostname())
+        auth = kerberos(username, password, realm=realm, address=address, hostname=hostname)
+    elif method == "negotiate":
+        auth = negotiate(username, password)
+    else:
+        raise RuntimeError(f"Unknown auth method from $WINRM_AUTH_METHOD: '{method}'")
+
+    return WinRMClient(endpoint, auth=auth)
 
 
 class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.endpoint = os.getenv("WINRM_ENDPOINT", "http://127.0.0.1:5985")
-        self.username = os.getenv("WINRM_USERNAME", "Administrator")
-        self.password = os.getenv("WINRM_PASSWORD", "password")
-        print("asyncio stuff stuff")
+    client: WinRMClient
 
-    async def test_cool(self):
-        print("cool test")
-        self.assertEqual(1, 1)
+    def setUp(self):
+        self.client = _get_client()
+
+    async def testIdentify(self):
+        response = await self.client.identify()
+        self.assertEqual(response.protocol_version, "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd")
+        self.assertIsNotNone(response.product_version)
+        self.assertIsNotNone(response.product_vendor)
+
+    async def testGetService(self):
+        service = await self.client.get_service("LanmanWorkstation")
+        self.assertEqual(service["Name"], "LanmanWorkstation")
+        self.assertIn("svchost.exe", service["PathName"])
+
+    async def testShell(self):
+        shell = await self.client.shell()
+        try:
+            proc = await shell.create_subprocess_exec("cmd.exe", "/c", "ver")
+            stdout, stderr = await proc.communicate()
+            await proc.wait()
+            self.assertIn("Microsoft Windows", stdout.decode())
+            self.assertFalse(stderr.decode())
+            self.assertIsNone(proc.returncode)
+        finally:
+            await shell.destroy()

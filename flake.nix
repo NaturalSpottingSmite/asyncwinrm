@@ -9,8 +9,6 @@
       asyncwinrm = final: prev: {
         python3 = prev.python3.override {
           packageOverrides = final: prev: {
-            httpx-ntlm-fixed = final.callPackage ./nix/httpx-ntlm-fixed.nix { };
-            httpx-gssapi = final.callPackage ./nix/httpx-gssapi.nix { };
             asyncwinrm = final.callPackage ./. { };
           };
         };

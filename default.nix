@@ -6,18 +6,14 @@
   pyspnego,
   yarl,
   httpx,
-  gssapi,
-  krb5,
 
   # check phase
   ruff,
   ty,
 
-  withNtlm ? false,
-  httpx-ntlm-fixed,
-
   withKerberos ? false,
-  httpx-gssapi,
+  gssapi,
+  krb5,
 
   lib,
 }:
@@ -41,9 +37,7 @@ buildPythonPackage {
     yarl
     httpx
   ]
-  ++ lib.optional withNtlm httpx-ntlm-fixed
   ++ lib.optionals withKerberos [
-    httpx-gssapi
     gssapi
     krb5
   ];
@@ -60,5 +54,8 @@ buildPythonPackage {
     runHook postCheck
   '';
 
-  meta.mainProgram = "audit-forwarder";
+  meta = {
+    description = "Asynchronous WinRM library for Python";
+    license = lib.licenses.mit;
+  };
 }

@@ -1,6 +1,6 @@
 [project]
 name = "asyncwinrm"
-version = "0.0.2"
+version = "0.0.3"
 description = "Asynchronous WinRM client library"
 requires-python = ">=3.13"
 dependencies = [
@@ -8,8 +8,6 @@ dependencies = [
     "pyspnego>=0.12.0",
     "yarl>=1.22.0",
     "httpx>=0.28.1",
-    "ty>=0.0.13",
-    "types-lxml>=2026.1.1",
 ]
 
 [tool.uv]
@@ -20,18 +18,16 @@ requires = ["uv_build>=0.9,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-ntlm = [
-    "httpx-ntlm-fixed>=1.4.1",
-]
 kerberos = [
-    "httpx-gssapi>=0.6.0",
     "gssapi >= 1.6.0; sys_platform != 'win32'",
     "krb5 >= 0.3.0; sys_platform != 'win32'",
+    "pyspnego>=0.12.0",
 ]
 dev = [
-    "black>=26.1.0",
     "pytest>=9.0.2",
-    "types-lxml>=2025.11.25",
+    "ruff>=0.14.14",
+    "ty>=0.0.13",
+    "types-lxml>=2026.1.1",
 ]
 
 [tool.ruff]

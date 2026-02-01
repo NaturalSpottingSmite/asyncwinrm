@@ -4,12 +4,12 @@ from typing import Optional, Self
 import httpx
 from lxml import etree
 
-from ..exceptions import TransportError, SoapFaultError
-from ..protocol.xml.element import SoapElement
+from ..exceptions import TransportError, SOAPFaultError
+from ..protocol.xml.element import SOAPElement
 
 
 @dataclass
-class SoapEnvelope:
+class SOAPEnvelope:
     """SOAP envelope"""
 
     root: etree.Element
@@ -17,7 +17,7 @@ class SoapEnvelope:
     @classmethod
     def new(cls, nsmap: dict[str, str]) -> Self:
         """Creates a new, empty envelope."""
-        envelope = cls(etree.Element(SoapElement.Envelope, nsmap=nsmap))
+        envelope = cls(etree.Element(SOAPElement.Envelope, nsmap=nsmap))
         # ensure headers and body exist
         envelope.header
         envelope.body
@@ -25,40 +25,40 @@ class SoapEnvelope:
 
     @property
     def header(self) -> etree.Element:
-        el = self.root.find(SoapElement.Header)
-        return el if el is not None else etree.SubElement(self.root, SoapElement.Header)
+        el = self.root.find(SOAPElement.Header)
+        return el if el is not None else etree.SubElement(self.root, SOAPElement.Header)
 
     @property
     def body(self) -> etree.Element:
-        el = self.root.find(SoapElement.Body)
-        return el if el is not None else etree.SubElement(self.root, SoapElement.Body)
+        el = self.root.find(SOAPElement.Body)
+        return el if el is not None else etree.SubElement(self.root, SOAPElement.Body)
 
     def __bytes__(self) -> bytes:
         return etree.tostring(self.root, xml_declaration=True, encoding="utf-8")
 
 
 @dataclass
-class SoapResponse(SoapEnvelope):
+class SOAPResponse(SOAPEnvelope):
     """A SOAP envelope that was received as a response"""
 
     http_response: httpx.Response
 
     @property
     def fault(self) -> Optional[tuple[Optional[str], Optional[str]]]:
-        el_fault = self.body.find(SoapElement.Fault)
+        el_fault = self.body.find(SOAPElement.Fault)
         if el_fault is not None:
             code = None
             reason = None
 
-            el_code = el_fault.find(SoapElement.Code)
+            el_code = el_fault.find(SOAPElement.Code)
             if el_code is not None:
-                el_value = el_code.find(SoapElement.Value)
+                el_value = el_code.find(SOAPElement.Value)
                 if el_value is not None:
                     code = el_value.text
 
-            el_reason = el_fault.find(SoapElement.Reason)
+            el_reason = el_fault.find(SOAPElement.Reason)
             if el_reason is not None:
-                el_text = el_reason.find(SoapElement.Text)
+                el_text = el_reason.find(SOAPElement.Text)
                 if el_text is not None:
                     reason = el_text.text
 
@@ -70,7 +70,7 @@ class SoapResponse(SoapEnvelope):
 
         fault = self.fault
         if fault is not None:
-            raise SoapFaultError(*fault)
+            raise SOAPFaultError(*fault)
 
         try:
             self.http_response.raise_for_status()
@@ -81,7 +81,7 @@ class SoapResponse(SoapEnvelope):
 
 
 @dataclass(frozen=True, slots=True)
-class SoapClient:
+class SOAPClient:
     """SOAP client"""
 
     http: httpx.AsyncClient
@@ -90,13 +90,13 @@ class SoapClient:
         """Closes the client and any currently open connections."""
         await self.http.aclose()
 
-    async def request(self, envelope: SoapEnvelope) -> SoapResponse:
+    async def request(self, envelope: SOAPEnvelope) -> SOAPResponse:
         """Executes a SOAP request and returns a response."""
         request = self.http.build_request("POST", "", content=bytes(envelope))
         response = await self.http.send(request)
         try:
             root = etree.fromstring(response.content)
-            return SoapResponse(root, http_response=response)
+            return SOAPResponse(root, http_response=response)
         except Exception:
             try:
                 response.raise_for_status()
@@ -107,4 +107,4 @@ class SoapClient:
             await response.aclose()
 
 
-__all__ = ["SoapEnvelope", "SoapResponse", "SoapClient"]
+__all__ = ["SOAPEnvelope", "SOAPResponse", "SOAPClient"]

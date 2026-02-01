@@ -3,26 +3,26 @@ from enum import StrEnum
 from .xml.namespace import Namespace
 
 
-class WsTransferAction(StrEnum):
-    Get = f"{Namespace.WsTransfer}/Get"
-    Put = f"{Namespace.WsTransfer}/Put"
-    Create = f"{Namespace.WsTransfer}/Create"
-    Delete = f"{Namespace.WsTransfer}/Delete"
+class WSTransferAction(StrEnum):
+    Get = f"{Namespace.WSTransfer}/Get"
+    Put = f"{Namespace.WSTransfer}/Put"
+    Create = f"{Namespace.WSTransfer}/Create"
+    Delete = f"{Namespace.WSTransfer}/Delete"
 
 
-class WsEnumerationAction(StrEnum):
-    Enumerate = f"{Namespace.WsEnumeration}/Enumerate"
-    Pull = f"{Namespace.WsEnumeration}/Pull"
-    Renew = f"{Namespace.WsEnumeration}/Renew"
-    GetStatus = f"{Namespace.WsEnumeration}/GetStatus"
-    Release = f"{Namespace.WsEnumeration}/Release"
+class WSEnumerationAction(StrEnum):
+    Enumerate = f"{Namespace.WSEnumeration}/Enumerate"
+    Pull = f"{Namespace.WSEnumeration}/Pull"
+    Renew = f"{Namespace.WSEnumeration}/Renew"
+    GetStatus = f"{Namespace.WSEnumeration}/GetStatus"
+    Release = f"{Namespace.WSEnumeration}/Release"
 
 
-class WsEventingAction(StrEnum):
-    Subscribe = f"{Namespace.WsEventing}/Subscribe"
-    Renew = f"{Namespace.WsEventing}/Renew"
-    GetStatus = f"{Namespace.WsEventing}/GetStatus"
-    Unsubscribe = f"{Namespace.WsEventing}/Unsubscribe"
+class WSEventingAction(StrEnum):
+    Subscribe = f"{Namespace.WSEventing}/Subscribe"
+    Renew = f"{Namespace.WSEventing}/Renew"
+    GetStatus = f"{Namespace.WSEventing}/GetStatus"
+    Unsubscribe = f"{Namespace.WSEventing}/Unsubscribe"
 
 
 class WindowsShellAction(StrEnum):
@@ -32,12 +32,12 @@ class WindowsShellAction(StrEnum):
     Signal = f"{Namespace.WindowsRemoteShell}/Signal"
 
 
-type Action = WsTransferAction | WsEnumerationAction | WsEventingAction | WindowsShellAction
+type Action = WSTransferAction | WSEnumerationAction | WSEventingAction | WindowsShellAction
 
 __all__ = [
-    "WsTransferAction",
-    "WsEnumerationAction",
-    "WsEventingAction",
+    "WSTransferAction",
+    "WSEnumerationAction",
+    "WSEventingAction",
     "WindowsShellAction",
     "Action",
 ]

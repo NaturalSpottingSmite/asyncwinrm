@@ -3,20 +3,20 @@ from lxml import etree
 from .namespace import Namespace
 
 
-class XmlAttribute:
+class XMLAttribute:
     Lang = etree.QName(Namespace.Xml, "lang")
 
 
-class XsiAttribute:
+class XSIAttribute:
     Nil = etree.QName(Namespace.Xsi, "nil")
 
 
-class SoapAttribute:
-    MustUnderstand = etree.QName(Namespace.Soap, "mustUnderstand")
+class SOAPAttribute:
+    MustUnderstand = etree.QName(Namespace.SOAP, "mustUnderstand")
 
 
 __all__ = [
-    "XmlAttribute",
-    "XsiAttribute",
-    "SoapAttribute",
+    "XMLAttribute",
+    "XSIAttribute",
+    "SOAPAttribute",
 ]

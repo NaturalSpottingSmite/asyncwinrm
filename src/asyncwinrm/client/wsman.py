@@ -7,35 +7,35 @@ from typing import Optional, AsyncGenerator
 import httpx
 from lxml import etree
 
-from .soap import SoapClient, SoapEnvelope, SoapResponse
+from .soap import SOAPClient, SOAPEnvelope, SOAPResponse
 from ..exceptions import ProtocolError
-from ..protocol.action import Action, WsTransferAction, WsEnumerationAction
+from ..protocol.action import Action, WSTransferAction, WSEnumerationAction
 from ..protocol.xml.element import (
-    WsAddressingElement,
-    WsManagementElement,
-    WsManagementIdentityElement,
-    WsEnumerationElement,
+    WSAddressingElement,
+    WSManagementElement,
+    WSManagementIdentityElement,
+    WSEnumerationElement,
 )
-from ..protocol.xml.attribute import XmlAttribute, SoapAttribute
+from ..protocol.xml.attribute import XMLAttribute, SOAPAttribute
 from ..protocol.xml.namespace import Namespace
 
 type Builder = Callable[[etree.Element], None]
 
 
 @dataclass
-class WsManagementEnvelope(SoapEnvelope):
+class WSManagementEnvelope(SOAPEnvelope):
     """WS-Management envelope"""
 
     @property
     def to(self) -> Optional[str]:
-        el_to = self.header.find(WsAddressingElement.To)
+        el_to = self.header.find(WSAddressingElement.To)
         return el_to.text if el_to is not None else None
 
     @to.setter
     def to(self, new_value: Optional[str]) -> None:
-        el_to = self.header.find(WsAddressingElement.To)
+        el_to = self.header.find(WSAddressingElement.To)
         if el_to is None and new_value is not None:
-            el_to = etree.SubElement(self.header, WsAddressingElement.To)
+            el_to = etree.SubElement(self.header, WSAddressingElement.To)
 
         if el_to is not None and new_value is not None:
             el_to.text = new_value
@@ -44,9 +44,9 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def reply_to(self) -> Optional[str]:
-        el_reply_to = self.header.find(WsAddressingElement.ReplyTo)
+        el_reply_to = self.header.find(WSAddressingElement.ReplyTo)
         if el_reply_to is not None:
-            el_address = el_reply_to.find(WsAddressingElement.Address)
+            el_address = el_reply_to.find(WSAddressingElement.Address)
             if el_address is not None:
                 return el_address.text
 
@@ -54,15 +54,15 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @reply_to.setter
     def reply_to(self, new_value: Optional[str]) -> None:
-        el_reply_to = self.header.find(WsAddressingElement.ReplyTo)
+        el_reply_to = self.header.find(WSAddressingElement.ReplyTo)
         if el_reply_to is None and new_value is not None:
-            el_reply_to = etree.SubElement(self.header, WsAddressingElement.ReplyTo)
+            el_reply_to = etree.SubElement(self.header, WSAddressingElement.ReplyTo)
 
         if el_reply_to is not None:
-            el_address = el_reply_to.find(WsAddressingElement.Address)
+            el_address = el_reply_to.find(WSAddressingElement.Address)
             if el_address is None and new_value is not None:
-                el_address = etree.SubElement(el_reply_to, WsAddressingElement.Address)
-                el_address.set(SoapAttribute.MustUnderstand, "true")
+                el_address = etree.SubElement(el_reply_to, WSAddressingElement.Address)
+                el_address.set(SOAPAttribute.MustUnderstand, "true")
 
             if el_address is not None and new_value is not None:
                 el_address.text = new_value
@@ -73,15 +73,15 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def action(self) -> Optional[str]:
-        el_action = self.header.find(WsAddressingElement.Action)
+        el_action = self.header.find(WSAddressingElement.Action)
         return el_action.text if el_action is not None else None
 
     @action.setter
     def action(self, new_value: Optional[str]) -> None:
-        el_action = self.header.find(WsAddressingElement.Action)
+        el_action = self.header.find(WSAddressingElement.Action)
         if el_action is None and new_value is not None:
-            el_action = etree.SubElement(self.header, WsAddressingElement.Action)
-            el_action.set(SoapAttribute.MustUnderstand, "true")
+            el_action = etree.SubElement(self.header, WSAddressingElement.Action)
+            el_action.set(SOAPAttribute.MustUnderstand, "true")
 
         if el_action is not None and new_value is not None:
             el_action.text = new_value
@@ -90,14 +90,14 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def message_id(self) -> Optional[str]:
-        el_message_id = self.header.find(WsAddressingElement.MessageId)
+        el_message_id = self.header.find(WSAddressingElement.MessageID)
         return el_message_id.text if el_message_id is not None else None
 
     @message_id.setter
     def message_id(self, new_value: Optional[str]):
-        el_message_id = self.header.find(WsAddressingElement.MessageId)
+        el_message_id = self.header.find(WSAddressingElement.MessageID)
         if el_message_id is None and new_value is not None:
-            el_message_id = etree.SubElement(self.header, WsAddressingElement.MessageId)
+            el_message_id = etree.SubElement(self.header, WSAddressingElement.MessageID)
 
         if el_message_id is not None and new_value is not None:
             el_message_id.text = new_value
@@ -106,18 +106,18 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def resource_uri(self) -> Optional[str]:
-        el_resource_uri = self.header.find(WsManagementElement.ResourceUri)
+        el_resource_uri = self.header.find(WSManagementElement.ResourceURI)
         return el_resource_uri.text if el_resource_uri is not None else None
 
     @resource_uri.setter
     def resource_uri(self, new_value: Optional[str]) -> None:
-        el_resource_uri = self.header.find(WsManagementElement.ResourceUri)
+        el_resource_uri = self.header.find(WSManagementElement.ResourceURI)
         if el_resource_uri is None and new_value is not None:
             el_resource_uri = etree.SubElement(
                 self.header,
-                WsManagementElement.ResourceUri,
+                WSManagementElement.ResourceURI,
             )
-            el_resource_uri.set(SoapAttribute.MustUnderstand, "true")
+            el_resource_uri.set(SOAPAttribute.MustUnderstand, "true")
 
         if el_resource_uri is not None and new_value is not None:
             el_resource_uri.text = new_value
@@ -126,21 +126,21 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def selectors(self) -> Optional[MappingProxyType]:
-        el_selector_set = self.header.find(WsManagementElement.SelectorSet)
+        el_selector_set = self.header.find(WSManagementElement.SelectorSet)
         if el_selector_set is not None:
             selectors = {}
-            for el_selector in el_selector_set.findall(WsManagementElement.Selector):
+            for el_selector in el_selector_set.findall(WSManagementElement.Selector):
                 selectors[el_selector.get("Name")] = el_selector.text
             return MappingProxyType(selectors)
         return None
 
     @selectors.setter
     def selectors(self, new_value: Optional[dict[str, str]]):
-        el_selector_set = self.header.find(WsManagementElement.SelectorSet)
+        el_selector_set = self.header.find(WSManagementElement.SelectorSet)
         if el_selector_set is None and new_value is not None:
             el_selector_set = etree.SubElement(
                 self.header,
-                WsManagementElement.SelectorSet,
+                WSManagementElement.SelectorSet,
             )
         elif el_selector_set is not None and new_value is not None:
             el_selector_set.clear()
@@ -149,7 +149,7 @@ class WsManagementEnvelope(SoapEnvelope):
             for name, value in new_value.items():
                 el_selector = etree.SubElement(
                     el_selector_set,
-                    WsManagementElement.Selector,
+                    WSManagementElement.Selector,
                 )
                 el_selector.set("Name", name)
                 el_selector.text = value
@@ -158,26 +158,26 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def options(self) -> Optional[MappingProxyType]:
-        el_option_set = self.header.find(WsManagementElement.OptionSet)
+        el_option_set = self.header.find(WSManagementElement.OptionSet)
         if el_option_set is not None:
             options = {}
-            for el_option in el_option_set.findall(WsManagementElement.Option):
+            for el_option in el_option_set.findall(WSManagementElement.Option):
                 options[el_option.get("Name")] = el_option.text
             return MappingProxyType(options)
         return None
 
     @options.setter
     def options(self, new_value: Optional[dict[str, str]]):
-        el_option_set = self.header.find(WsManagementElement.OptionSet)
+        el_option_set = self.header.find(WSManagementElement.OptionSet)
         if el_option_set is None and new_value is not None:
-            el_option_set = etree.SubElement(self.header, WsManagementElement.OptionSet)
-            el_option_set.set(SoapAttribute.MustUnderstand, "true")
+            el_option_set = etree.SubElement(self.header, WSManagementElement.OptionSet)
+            el_option_set.set(SOAPAttribute.MustUnderstand, "true")
         elif el_option_set is not None and new_value is not None:
             el_option_set.clear()
 
         if el_option_set is not None and new_value is not None:
             for name, value in new_value.items():
-                el_option = etree.SubElement(el_option_set, WsManagementElement.Option)
+                el_option = etree.SubElement(el_option_set, WSManagementElement.Option)
                 el_option.set("Name", name)
                 el_option.text = value
         elif el_option_set is not None:
@@ -185,50 +185,50 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def locale(self) -> Optional[str]:
-        el_locale = self.header.find(WsManagementElement.Locale)
-        return el_locale.get(XmlAttribute.Lang) if el_locale is not None else None
+        el_locale = self.header.find(WSManagementElement.Locale)
+        return el_locale.get(XMLAttribute.Lang) if el_locale is not None else None
 
     @locale.setter
     def locale(self, new_value: Optional[str]) -> None:
-        el_locale = self.header.find(WsManagementElement.Locale)
+        el_locale = self.header.find(WSManagementElement.Locale)
         if el_locale is None and new_value is not None:
-            el_locale = etree.SubElement(self.header, WsManagementElement.Locale)
-            el_locale.set(SoapAttribute.MustUnderstand, "false")
+            el_locale = etree.SubElement(self.header, WSManagementElement.Locale)
+            el_locale.set(SOAPAttribute.MustUnderstand, "false")
 
         if el_locale is not None and new_value is not None:
-            el_locale.set(XmlAttribute.Lang, new_value)
+            el_locale.set(XMLAttribute.Lang, new_value)
         elif el_locale is not None:
             self.header.remove(el_locale)
 
     @property
     def data_locale(self) -> Optional[str]:
-        el_data_locale = self.header.find(WsManagementElement.DataLocale)
-        return el_data_locale.get(XmlAttribute.Lang) if el_data_locale is not None else None
+        el_data_locale = self.header.find(WSManagementElement.DataLocale)
+        return el_data_locale.get(XMLAttribute.Lang) if el_data_locale is not None else None
 
     @data_locale.setter
     def data_locale(self, new_value: Optional[str]) -> None:
-        el_data_locale = self.header.find(WsManagementElement.DataLocale)
+        el_data_locale = self.header.find(WSManagementElement.DataLocale)
         if el_data_locale is None and new_value is not None:
-            el_data_locale = etree.SubElement(self.header, WsManagementElement.DataLocale)
-            el_data_locale.set(SoapAttribute.MustUnderstand, "false")
+            el_data_locale = etree.SubElement(self.header, WSManagementElement.DataLocale)
+            el_data_locale.set(SOAPAttribute.MustUnderstand, "false")
 
         if el_data_locale is not None and new_value is not None:
-            el_data_locale.set(XmlAttribute.Lang, new_value)
+            el_data_locale.set(XMLAttribute.Lang, new_value)
         elif el_data_locale is not None:
             self.header.remove(el_data_locale)
 
     @property
     def timeout(self) -> Optional[str]:
-        el_timeout = self.header.find(WsManagementElement.OperationTimeout)
+        el_timeout = self.header.find(WSManagementElement.OperationTimeout)
         return el_timeout.text if el_timeout is not None else None
 
     @timeout.setter
     def timeout(self, new_value: Optional[str]) -> None:
-        el_timeout = self.header.find(WsManagementElement.OperationTimeout)
+        el_timeout = self.header.find(WSManagementElement.OperationTimeout)
         if el_timeout is None and new_value is not None:
             el_timeout = etree.SubElement(
                 self.header,
-                WsManagementElement.OperationTimeout,
+                WSManagementElement.OperationTimeout,
             )
 
         if el_timeout is not None and new_value is not None:
@@ -238,7 +238,7 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @property
     def max_size(self) -> Optional[int]:
-        el_max_size = self.header.find(WsManagementElement.MaxEnvelopeSize)
+        el_max_size = self.header.find(WSManagementElement.MaxEnvelopeSize)
         if el_max_size is not None:
             value = el_max_size.text
             if value is not None:
@@ -248,13 +248,13 @@ class WsManagementEnvelope(SoapEnvelope):
 
     @max_size.setter
     def max_size(self, new_value: Optional[int]) -> None:
-        el_max_size = self.header.find(WsManagementElement.MaxEnvelopeSize)
+        el_max_size = self.header.find(WSManagementElement.MaxEnvelopeSize)
         if el_max_size is None and new_value is not None:
             el_max_size = etree.SubElement(
                 self.header,
-                WsManagementElement.MaxEnvelopeSize,
+                WSManagementElement.MaxEnvelopeSize,
             )
-            el_max_size.set(SoapAttribute.MustUnderstand, "true")
+            el_max_size.set(SOAPAttribute.MustUnderstand, "true")
 
         if el_max_size is not None and new_value is not None:
             el_max_size.text = str(new_value)
@@ -263,7 +263,7 @@ class WsManagementEnvelope(SoapEnvelope):
 
 
 @dataclass
-class WsManagementResponse(WsManagementEnvelope, SoapResponse):
+class WSManagementResponse(WSManagementEnvelope, SOAPResponse):
     """A WS-Management envelope that was received as a response"""
 
     data_element: Optional[etree.QName]
@@ -280,45 +280,45 @@ class WsManagementResponse(WsManagementEnvelope, SoapResponse):
 
 
 @dataclass
-class WsManagementIdentifyResponse(WsManagementResponse):
+class WSManagementIdentifyResponse(WSManagementResponse):
     """Response from WS-Management Identify action"""
 
     @property
     def protocol_version(self) -> Optional[str]:
         """Returns the remote server's protocol version as a URI."""
-        el_protocol_version = self.data.find(WsManagementIdentityElement.ProtocolVersion)
+        el_protocol_version = self.data.find(WSManagementIdentityElement.ProtocolVersion)
         return el_protocol_version.text if el_protocol_version is not None else None
 
     @property
     def product_vendor(self) -> Optional[str]:
         """Returns the remote server software product's vendor."""
-        el_product_vendor = self.data.find(WsManagementIdentityElement.ProductVendor)
+        el_product_vendor = self.data.find(WSManagementIdentityElement.ProductVendor)
         return el_product_vendor.text if el_product_vendor is not None else None
 
     @property
     def product_version(self) -> Optional[str]:
         """Returns the remote server software product's version."""
-        el_product_version = self.data.find(WsManagementIdentityElement.ProductVersion)
+        el_product_version = self.data.find(WSManagementIdentityElement.ProductVersion)
         return el_product_version.text if el_product_version is not None else None
 
     @property
     def security_profiles(self) -> Optional[list[str]]:
         """Returns the remote server's supported security profiles as a list of URIs."""
-        el_security_profiles = self.data.find(WsManagementIdentityElement.SecurityProfiles)
+        el_security_profiles = self.data.find(WSManagementIdentityElement.SecurityProfiles)
         if el_security_profiles is not None:
             security_profiles = []
-            for el_security_profile in el_security_profiles.findall(WsManagementIdentityElement.SecurityProfileName):
+            for el_security_profile in el_security_profiles.findall(WSManagementIdentityElement.SecurityProfileName):
                 security_profiles.append(el_security_profile.text)
             return security_profiles
         return None
 
 
-class WsManagementClient:
+class WSManagementClient:
     """WS-Management client"""
 
     __slots__ = ("_soap", "endpoint", "locale", "timeout", "max_envelope_size")
 
-    _soap: SoapClient
+    _soap: SOAPClient
     endpoint: httpx.URL
     locale: Optional[str]
     timeout: Optional[int]
@@ -333,7 +333,7 @@ class WsManagementClient:
         timeout: Optional[int] = None,
         max_envelope_size: Optional[int] = None,
     ):
-        self._soap = SoapClient(client)
+        self._soap = SOAPClient(client)
         self.endpoint = endpoint
         self.locale = locale
         self.timeout = timeout
@@ -343,19 +343,17 @@ class WsManagementClient:
         """Closes the client and any currently open connections."""
         await self._soap.close()
 
-    async def identify(self) -> WsManagementIdentifyResponse:
+    async def identify(self) -> WSManagementIdentifyResponse:
         """Tests the connection and returns protocol information."""
-        envelope = SoapEnvelope.new({"s": Namespace.Soap, "wsmid": Namespace.WsManagementIdentity})
-        etree.SubElement(envelope.body, WsManagementIdentityElement.Identify)
+        envelope = WSManagementEnvelope.new({"s": Namespace.SOAP, "wsmid": Namespace.WSManagementIdentity})
+        etree.SubElement(envelope.body, WSManagementIdentityElement.Identify)
 
-        response = await self._soap.request(envelope)
-        response = WsManagementIdentifyResponse(
+        response = await self.run_request(envelope, WSManagementIdentityElement.IdentifyResponse)
+        return WSManagementIdentifyResponse(
             response.root,
             http_response=response.http_response,
-            data_element=WsManagementIdentityElement.IdentifyResponse,
+            data_element=WSManagementIdentityElement.IdentifyResponse,
         )
-        response.raise_for_status()
-        return response
 
     # === Requests ===
 
@@ -371,7 +369,7 @@ class WsManagementClient:
         locale: Optional[str] = None,
         timeout: Optional[int] = None,
         max_size: Optional[int] = None,
-    ) -> WsManagementEnvelope:
+    ) -> WSManagementEnvelope:
         """
         Constructs a request.
 
@@ -384,11 +382,11 @@ class WsManagementClient:
         :param locale: Locale to use for human-readable messages. Defaults to the client's locale.
         :param timeout: Timeout for the operation. Defaults to the client's timeout.
         :param max_size: Maximum envelope size the server will return. Defaults to the client's maximum envelope size.
-        :return: A WsManagementEnvelope that contains the request body and can be used to execute the request.
+        :return: A WSManagementEnvelope that contains the request body and can be used to execute the request.
         """
-        envelope = WsManagementEnvelope.new(Namespace.nsmap())
+        envelope = WSManagementEnvelope.new(Namespace.nsmap())
         envelope.to = str(self.endpoint)
-        envelope.reply_to = f"{Namespace.WsAddressing}/role/anonymous"
+        envelope.reply_to = f"{Namespace.WSAddressing}/role/anonymous"
         envelope.action = action
         envelope.message_id = message_id if message_id is not None else f"urn:uuid:{uuid.uuid4()}"
         envelope.resource_uri = resource_uri
@@ -418,9 +416,9 @@ class WsManagementClient:
 
     async def run_request(
         self,
-        envelope: WsManagementEnvelope,
+        envelope: WSManagementEnvelope,
         data_element: Optional[etree.QName],
-    ) -> WsManagementResponse:
+    ) -> WSManagementResponse:
         """
         Executes a WS-Management request from an envelope.
 
@@ -431,7 +429,7 @@ class WsManagementClient:
         """
         response = await self._soap.request(envelope)
         response.raise_for_status()
-        return WsManagementResponse(response.root, http_response=response.http_response, data_element=data_element)
+        return WSManagementResponse(response.root, http_response=response.http_response, data_element=data_element)
 
     async def request(
         self,
@@ -446,7 +444,7 @@ class WsManagementClient:
         locale: Optional[str] = None,
         timeout: Optional[int] = None,
         max_size: Optional[int] = None,
-    ) -> WsManagementResponse:
+    ) -> WSManagementResponse:
         """
         Constructs and executes a request.
 
@@ -484,7 +482,7 @@ class WsManagementClient:
         data_element: Optional[etree.QName] = None,
         selectors: Optional[dict[str, str]] = None,
         options: Optional[dict[str, str]] = None,
-    ) -> WsManagementResponse:
+    ) -> WSManagementResponse:
         """
         Gets a resource.
 
@@ -497,7 +495,7 @@ class WsManagementClient:
                  "data_element".
         """
         return await self.request(
-            WsTransferAction.Get,
+            WSTransferAction.Get,
             data_element=data_element,
             resource_uri=resource_uri,
             selectors=selectors,
@@ -525,23 +523,23 @@ class WsManagementClient:
                              should be kept relatively small to prevent using up large amounts of memory.
         :return: A generator yielding all elements in the enumeration.
         """
-        enum_body = etree.Element(WsEnumerationElement.Enumerate)
-        etree.SubElement(enum_body, WsManagementElement.OptimizeOperation)
-        etree.SubElement(enum_body, WsEnumerationElement.MaxElements).text = str(max_elements)
+        enum_body = etree.Element(WSEnumerationElement.Enumerate)
+        etree.SubElement(enum_body, WSManagementElement.OptimizeOperation)
+        etree.SubElement(enum_body, WSEnumerationElement.MaxElements).text = str(max_elements)
 
         context: Optional[etree.Element] = None
 
         resp = await self.request(
-            WsEnumerationAction.Enumerate,
+            WSEnumerationAction.Enumerate,
             enum_body,
-            data_element=WsEnumerationElement.EnumerateResponse,
+            data_element=WSEnumerationElement.EnumerateResponse,
             resource_uri=resource_uri,
             selectors=selectors,
             options=options,
         )
 
-        body = etree.Element(WsEnumerationElement.Pull)
-        etree.SubElement(body, WsEnumerationElement.MaxElements).text = str(max_elements)
+        body = etree.Element(WSEnumerationElement.Pull)
+        etree.SubElement(body, WSEnumerationElement.MaxElements).text = str(max_elements)
 
         finished = False
         next_context: Optional[etree.Element]
@@ -549,12 +547,12 @@ class WsManagementClient:
             while not finished:
                 next_context = context
                 for el in resp.data:
-                    if el.tag == WsEnumerationElement.EnumerationContext:
+                    if el.tag == WSEnumerationElement.EnumerationContext:
                         next_context = el
-                    elif el.tag == WsEnumerationElement.Items:
+                    elif el.tag == WSEnumerationElement.Items:
                         for item in el:
                             yield item
-                    elif el.tag == WsEnumerationElement.EndOfSequence:
+                    elif el.tag == WSEnumerationElement.EndOfSequence:
                         finished = True
                 if context is not None:
                     body.remove(context)
@@ -564,9 +562,9 @@ class WsManagementClient:
                 body.append(context)
                 if not finished:
                     resp = await self.request(
-                        WsEnumerationAction.Pull,
+                        WSEnumerationAction.Pull,
                         body,
-                        data_element=WsEnumerationElement.PullResponse,
+                        data_element=WSEnumerationElement.PullResponse,
                         resource_uri=resource_uri,
                         selectors=selectors,
                         options=options,
@@ -574,12 +572,12 @@ class WsManagementClient:
         finally:
             if not finished and context is not None:
                 await self.request(
-                    WsEnumerationAction.Release,
-                    lambda b: etree.SubElement(b, WsEnumerationElement.Release).append(context),
+                    WSEnumerationAction.Release,
+                    lambda b: etree.SubElement(b, WSEnumerationElement.Release).append(context),
                     resource_uri=resource_uri,
                     selectors=selectors,
                     options=options,
                 )
 
 
-__all__ = ["WsManagementEnvelope", "WsManagementResponse", "WsManagementIdentifyResponse", "WsManagementClient"]
+__all__ = ["WSManagementEnvelope", "WSManagementResponse", "WSManagementIdentifyResponse", "WSManagementClient"]

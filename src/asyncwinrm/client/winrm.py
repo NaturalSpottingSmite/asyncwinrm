@@ -4,14 +4,19 @@ from typing import Optional, Any
 import httpx
 from lxml import etree
 
-from .wsman import WsManagementClient
+from .wsman import WSManagementClient
 from ..exceptions import ProtocolError
 from ..protocol.uri import cim
-from ..protocol.action import WsTransferAction
-from ..protocol.xml.attribute import XsiAttribute
+from ..protocol.action import WSTransferAction
+from ..protocol.xml.attribute import XSIAttribute
 from ..shell import Shell
-from ..protocol.xml.element import CimElement, RemoteShellElement, WsTransferElement, WsAddressingElement, \
-    WsManagementElement
+from ..protocol.xml.element import (
+    CIMElement,
+    RemoteShellElement,
+    WSTransferElement,
+    WSAddressingElement,
+    WSManagementElement,
+)
 from ..protocol.xml.namespace import Namespace
 
 
@@ -32,7 +37,7 @@ def dictify(root: etree.Element) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for el in root:
         name = etree.QName(el).localname
-        if el.get(XsiAttribute.Nil) == "true":
+        if el.get(XSIAttribute.Nil) == "true":
             result[name] = None
         else:
             result[name] = _dictify_coerce(el.text)
@@ -65,17 +70,18 @@ def _parse_endpoint(endpoint: str | httpx.URL) -> httpx.URL:
     return url
 
 
-class WinRmClient(WsManagementClient):
+class WinRMClient(WSManagementClient):
     """High-level WinRM client"""
 
     def __init__(
         self,
         endpoint: str | httpx.URL,
         *,
-        auth: Optional[httpx.Auth] = None,
+        auth: httpx.Auth,
         verify: bool = True,
         locale: str = "en-US",
         timeout: Optional[int] = None,
+        http_timeout: float | httpx.Timeout = httpx.Timeout(5.0, read=30.0),
         max_envelope_size: int = 512 * 1024,
     ):
         ep = _parse_endpoint(endpoint)
@@ -84,8 +90,15 @@ class WinRmClient(WsManagementClient):
             auth=auth,
             verify=verify,
             headers={"Content-Type": "application/soap+xml; charset=UTF-8"},
+            timeout=http_timeout,
         )
-        super().__init__(client, ep, locale=locale, timeout=timeout, max_envelope_size=max_envelope_size)
+        super().__init__(
+            client,
+            ep,
+            locale=locale,
+            timeout=timeout,
+            max_envelope_size=max_envelope_size,
+        )
 
     async def get_cim_object(self, obj: etree.QName, *, name: Optional[str] = None):
         """Get a CIM object."""
@@ -97,11 +110,11 @@ class WinRmClient(WsManagementClient):
 
     async def get_operating_system(self) -> dict[str, Any]:
         """Get the remote operating system information."""
-        return await self.get_cim_object(CimElement.OperatingSystem)
+        return await self.get_cim_object(CIMElement.OperatingSystem)
 
     async def get_service(self, name: str) -> dict[str, Any]:
         """Get a service by name."""
-        return await self.get_cim_object(CimElement.Service, name=name)
+        return await self.get_cim_object(CIMElement.Service, name=name)
 
     async def shell(
         self,
@@ -139,21 +152,21 @@ class WinRmClient(WsManagementClient):
             etree.SubElement(body, RemoteShellElement.Lifetime).text = f"PT{lifetime}S"
 
         response = await self.request(
-            WsTransferAction.Create,
+            WSTransferAction.Create,
             body,
             resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
-            data_element=WsTransferElement.ResourceCreated,
+            data_element=WSTransferElement.ResourceCreated,
         )
 
-        el_reference_parameters = response.data.find(WsAddressingElement.ReferenceParameters)
+        el_reference_parameters = response.data.find(WSAddressingElement.ReferenceParameters)
         if el_reference_parameters is None:
             raise ProtocolError("CreateShell response missing ReferenceParameters")
 
-        el_selector_set = el_reference_parameters.find(WsManagementElement.SelectorSet)
+        el_selector_set = el_reference_parameters.find(WSManagementElement.SelectorSet)
         if el_selector_set is None:
             raise ProtocolError("CreateShell response missing SelectorSet")
 
-        for el_selector in el_selector_set.findall(WsManagementElement.Selector):
+        for el_selector in el_selector_set.findall(WSManagementElement.Selector):
             if el_selector.get("Name") != "ShellId":
                 continue
             return Shell(client=self, id=el_selector.text)
@@ -161,4 +174,4 @@ class WinRmClient(WsManagementClient):
         raise ProtocolError("CreateShell response missing ShellId")
 
 
-__all__ = ["WinRmClient"]
+__all__ = ["WinRMClient"]

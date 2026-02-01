@@ -12,17 +12,17 @@ from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, cast
 import httpx
 from lxml import etree
 
-from .exceptions import ProtocolError
+from .exceptions import ProtocolError, TransportError
 from .protocol.action import (
     WindowsShellAction,
-    WsTransferAction,
+    WSTransferAction,
 )
 from .protocol.shell import WindowsShellSignal, StreamEvent, CommandState, CommandStateEvent
 from .protocol.xml.element import RemoteShellElement
 from .protocol.xml.namespace import Namespace
 
 if TYPE_CHECKING:
-    from .client.winrm import WinRmClient
+    from .client.winrm import WinRMClient
 
 ProcessSource = Union[int, str, PurePath, asyncio.StreamReader, IO[bytes]]
 ProcessTarget = Union[int, str, PurePath, asyncio.StreamWriter, IO[bytes]]
@@ -105,7 +105,10 @@ class _StdinWriter:
             data = await self._queue.get()
             try:
                 if data is None:
-                    await self._shell._send(self._command_id, b"", end=True)
+                    try:
+                        await self._shell._send(self._command_id, b"", end=True)
+                    except TransportError:
+                        return
                     return
                 await self._shell._send(self._command_id, data)
             finally:
@@ -184,11 +187,11 @@ class CompletedProcess:
 
 
 class Shell:
-    client: "WinRmClient"
+    client: "WinRMClient"
     id: str
     destroyed = False
 
-    def __init__(self, client: "WinRmClient", id: str) -> None:
+    def __init__(self, client: "WinRMClient", id: str) -> None:
         self.client = client
         self.id = id
 
@@ -196,7 +199,7 @@ class Shell:
         if self.destroyed:
             raise RuntimeError("Shell has been destroyed")
         await self.client.request(
-            WsTransferAction.Delete,
+            WSTransferAction.Delete,
             resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
         )
@@ -221,7 +224,7 @@ class Shell:
             selectors={"ShellId": self.id},
             data_element=RemoteShellElement.CommandResponse,
         )
-        command_id = response.data.findtext(RemoteShellElement.CommandId)
+        command_id = response.data.findtext(RemoteShellElement.CommandID)
         if not command_id:
             raise ProtocolError("Command response missing CommandId")
         return command_id
