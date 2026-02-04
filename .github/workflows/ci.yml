@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  test:
+    name: "Test ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Windows Server 2008 R2"
+            box: server2008r2
+            ip: 172.28.128.11
+          - name: "Windows Server 2012 R2"
+            box: server2012r2
+            ip: 172.28.128.12
+          - name: "Windows Server 2016"
+            box: server2016
+            ip: 172.28.128.13
+          - name: "Windows Server 2019"
+            box: server2019
+            ip: 172.28.128.14
+          - name: "Windows Server 2022"
+            box: server2022
+            ip: 172.28.128.15
+
+    env:
+      VAGRANT_DEFAULT_PROVIDER: libvirt
+      VAGRANT_DISABLE_V2_WARNING: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients vagrant
+          sudo systemctl enable --now libvirtd
+          sudo usermod -aG libvirt "$USER"
+          vagrant plugin install vagrant-libvirt
+
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start Vagrant VM
+        run: |
+          vagrant up "${{ matrix.box }}"
+          vagrant winrm "${{ matrix.box }}" -c "echo Ready"
+
+      - name: Run tests
+        env:
+          WINRM_ENDPOINT: ${{ matrix.ip }}
+          WINRM_AUTH_METHOD: negotiate
+          WINRM_AUTH_USERNAME: vagrant
+          WINRM_AUTH_PASSWORD: vagrant
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          uv sync --locked
+          uv run python -m unittest -v
+
+      - name: Cleanup Vagrant VM
+        if: always()
+        run: vagrant destroy -f "${{ matrix.box }}"
