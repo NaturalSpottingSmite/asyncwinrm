@@ -62,7 +62,6 @@ jobs:
         env:
           WINRM_ENDPOINT: ${{ matrix.ip }}
           WINRM_AUTH_METHOD: negotiate
-          WINRM_AUTH_USERNAME: vagrant
           WINRM_AUTH_PASSWORD: vagrant
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
