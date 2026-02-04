@@ -29,6 +29,9 @@ Vagrant.configure("2") do |config|
       node.vm.box = info[:box]
       node.vm.hostname = name
       node.vm.network "private_network", ip: info[:ip]
+      node.vm.provision "shell",
+        inline: "net user Administrator /ACTIVE:YES",
+        privileged: true
       node.vm.provider "libvirt" do |lv|
         lv.memory = 2048
         lv.cpus = 2
