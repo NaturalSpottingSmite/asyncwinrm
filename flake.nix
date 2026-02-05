@@ -26,5 +26,9 @@
       default = asyncwinrm;
       inherit ((self.overlays.default pkgs pkgs).python3.pkgs) asyncwinrm;
     });
+
+    checks = forEachSystem (pkgs: rec {
+      inherit ((self.overlays.default pkgs pkgs).python3.pkgs) asyncwinrm;
+    });
   };
 }
