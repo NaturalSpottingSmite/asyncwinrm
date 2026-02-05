@@ -97,12 +97,11 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
 
             proc.stdin.write(b"echo hello\r\n")
             await proc.stdin.drain()
-            # the first time is from our command getting echoed back, the second time is the actual output
-            await _read_until_contains(proc.stdout, b"hello\r\nhello\r\n")
+            await _read_until_contains(proc.stdout, b"hello\r\n\r\n")
 
             proc.stdin.write(b"echo world\r\n")
             await proc.stdin.drain()
-            await _read_until_contains(proc.stdout, b"world\r\nworld\r\n")
+            await _read_until_contains(proc.stdout, b"world\r\n\r\n")
 
             proc.stdin.write(b"exit\r\n")
             await proc.stdin.drain()
