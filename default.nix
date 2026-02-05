@@ -2,6 +2,7 @@
   buildPythonPackage,
   uv-build,
 
+  isodate,
   lxml,
   pyspnego,
   yarl,
@@ -33,6 +34,7 @@ buildPythonPackage {
   build-system = [ uv-build ];
 
   dependencies = [
+    isodate
     lxml
     pyspnego
     yarl
