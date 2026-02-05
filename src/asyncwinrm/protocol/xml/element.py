@@ -9,6 +9,7 @@ class SOAPElement:
     Header = etree.QName(Namespace.SOAP, "Header")
     Body = etree.QName(Namespace.SOAP, "Body")
     Fault = etree.QName(Namespace.SOAP, "Fault")
+    Detail = etree.QName(Namespace.SOAP, "Detail")
     Reason = etree.QName(Namespace.SOAP, "Reason")
     Text = etree.QName(Namespace.SOAP, "Text")
     Code = etree.QName(Namespace.SOAP, "Code")
@@ -39,6 +40,10 @@ class WSManagementElement:
     Option = etree.QName(Namespace.WSManagement, "Option")
     OperationTimeout = etree.QName(Namespace.WSManagement, "OperationTimeout")
     OptimizeOperation = etree.QName(Namespace.WSManagement, "OptimizeOperation")
+
+
+class WSManFaultElement:
+    WSManFault = etree.QName(Namespace.WSManFault, "WSManFault")
 
 
 class WSManagementIdentityElement:
@@ -88,6 +93,7 @@ class RemoteShellElement:
     CommandState = etree.QName(Namespace.WindowsRemoteShell, "CommandState")
     ExitCode = etree.QName(Namespace.WindowsRemoteShell, "ExitCode")
     Send = etree.QName(Namespace.WindowsRemoteShell, "Send")
+    IdleTimeOut = etree.QName(Namespace.WindowsRemoteShell, "IdleTimeOut")
 
 
 def _make_cim_element(name: str) -> etree.QName:

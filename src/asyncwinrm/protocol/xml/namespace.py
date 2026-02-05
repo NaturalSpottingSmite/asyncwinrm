@@ -14,6 +14,7 @@ class Namespace(StrEnum):
     WSEventing = "http://schemas.xmlsoap.org/ws/2004/08/eventing"
     WSEnumeration = "http://schemas.xmlsoap.org/ws/2004/09/enumeration"
     WSManagement = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"
+    WSManFault = "http://schemas.microsoft.com/wbem/wsman/1/wsmanfault"
 
     # Not included in the global namespace map
     WSManagementIdentity = "http://schemas.dmtf.org/wbem/wsman/identity/1/wsmanidentity.xsd"

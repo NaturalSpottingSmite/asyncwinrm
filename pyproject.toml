@@ -1,6 +1,6 @@
 [project]
 name = "asyncwinrm"
-version = "0.0.5"
+version = "0.0.6"
 description = "Asynchronous WinRM client library"
 requires-python = ">=3.13"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
     "pyspnego>=0.12.0",
     "yarl>=1.22.0",
     "httpx>=0.28.1",
+    "isodate>=0.7.2",
 ]
 
 [tool.uv]

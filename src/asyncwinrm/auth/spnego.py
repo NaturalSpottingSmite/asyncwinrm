@@ -26,6 +26,7 @@ class SPNEGOAuth(Auth):
     # make multiple SPNEGOAuth instances and use them with multiple clients if you really need to do things in parallel.
     _lock: threading.Lock
     _async_lock: asyncio.Lock
+    _context: Optional[spnego.ContextProxy]
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class SPNEGOAuth(Auth):
         self.service = service
         self._lock = threading.Lock()
         self._async_lock = asyncio.Lock()
+        self._context = None
 
     def _get_context(self) -> spnego.ContextProxy:
         return spnego.client(
@@ -93,32 +95,48 @@ class SPNEGOAuth(Auth):
         )
 
     def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
-        context = self._get_context()
+        response = yield request
+        if response.status_code != 401:
+            return
+        response.read()
         with self._lock:
-            in_token: bytes | None = None
-            while not context.complete:
+            in_token = self._decode_header(response)
+            context = self._get_context()
+            for _ in range(10):
                 out_token = context.step(in_token)
                 if out_token is None:
-                    break
-                response = yield request
-                in_token = self._decode_header(response)
+                    return
+                challenge = self._clone_request(request)
+                self._set_auth_header(challenge, out_token)
+                response = yield challenge
                 response.read()
-                if in_token is None:
-                    break
+                if response.status_code != 401:
+                    if context.complete:
+                        self._context = context
+                    return
+                in_token = self._decode_header(response)
 
     async def async_auth_flow(self, request: Request) -> AsyncGenerator[Request, Response]:
-        context = self._get_context()
+        response = yield request
+        if response.status_code != 401:
+            return
+        await response.aread()
         async with self._async_lock:
-            in_token: bytes | None = None
-            while not context.complete:
+            in_token = self._decode_header(response)
+            context = self._get_context()
+            for _ in range(10):
                 out_token = context.step(in_token)
                 if out_token is None:
-                    break
-                response = yield request
-                in_token = self._decode_header(response)
+                    return
+                challenge = self._clone_request(request)
+                self._set_auth_header(challenge, out_token)
+                response = yield challenge
                 await response.aread()
-                if in_token is None:
-                    break
+                if response.status_code != 401:
+                    if context.complete:
+                        self._context = context
+                    return
+                in_token = self._decode_header(response)
 
 
 class SPNEGOEncryptedAuth(SPNEGOAuth):
@@ -137,10 +155,29 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
         return self._clone_request_with_content(request, encrypted_body, headers=headers)
 
     def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
-        context = self._get_context()
         with self._lock:
-            in_token: bytes | None = None
-            while not context.complete:
+            if self._context is not None and self._context.complete:
+                encrypted_request = self._build_encrypted_request(request, self._context)
+                response = yield encrypted_request
+                content = response.read()
+                if response.status_code != 401:
+                    decrypted = decrypt_response_content(
+                        self._context, content, response.headers.get("Content-Type", "")
+                    )
+                    response._content = decrypted
+                    return
+                self._context = None
+
+        response = yield request
+        if response.status_code != 401:
+            return
+        response.read()
+        with self._lock:
+            in_token = self._decode_header(response)
+            context = self._get_context()
+            for _ in range(10):
+                if context.complete:
+                    break
                 out_token = context.step(in_token)
                 if out_token is None:
                     break
@@ -155,12 +192,33 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
             content = response.read()
             decrypted = decrypt_response_content(context, content, response.headers.get("Content-Type", ""))
             response._content = decrypted
+            if context.complete:
+                self._context = context
 
     async def async_auth_flow(self, request: Request) -> AsyncGenerator[Request, Response]:
-        context = self._get_context()
         async with self._async_lock:
-            in_token: bytes | None = None
-            while not context.complete:
+            if self._context is not None and self._context.complete:
+                encrypted_request = self._build_encrypted_request(request, self._context)
+                response = yield encrypted_request
+                content = await response.aread()
+                if response.status_code != 401:
+                    decrypted = decrypt_response_content(
+                        self._context, content, response.headers.get("Content-Type", "")
+                    )
+                    response._content = decrypted
+                    return
+                self._context = None
+
+        response = yield request
+        if response.status_code != 401:
+            return
+        await response.aread()
+        async with self._async_lock:
+            in_token = self._decode_header(response)
+            context = self._get_context()
+            for _ in range(10):
+                if context.complete:
+                    break
                 out_token = context.step(in_token)
                 if out_token is None:
                     break
@@ -175,6 +233,8 @@ class SPNEGOEncryptedAuth(SPNEGOAuth):
             content = await response.aread()
             decrypted = decrypt_response_content(context, content, response.headers.get("Content-Type", ""))
             response._content = decrypted
+            if context.complete:
+                self._context = context
 
 
 def negotiate(username: str, password: str, *, encrypted: bool = True) -> Auth:

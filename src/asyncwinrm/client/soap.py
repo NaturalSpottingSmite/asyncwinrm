@@ -4,8 +4,8 @@ from typing import Optional, Self
 import httpx
 from lxml import etree
 
-from ..exceptions import TransportError, SOAPFaultError
-from ..protocol.xml.element import SOAPElement
+from ..exceptions import TransportError, SOAPFaultError, WSManFaultError
+from ..protocol.xml.element import SOAPElement, WSManFaultElement
 
 
 @dataclass
@@ -44,11 +44,13 @@ class SOAPResponse(SOAPEnvelope):
     http_response: httpx.Response
 
     @property
-    def fault(self) -> Optional[tuple[Optional[str], Optional[str]]]:
+    def fault(self) -> Optional[tuple[Optional[str], Optional[str], Optional[str]]]:
+        # print(etree.tostring(self.body, pretty_print=True, encoding="unicode"))
         el_fault = self.body.find(SOAPElement.Fault)
         if el_fault is not None:
             code = None
             reason = None
+            wsman_code = None
 
             el_code = el_fault.find(SOAPElement.Code)
             if el_code is not None:
@@ -62,7 +64,13 @@ class SOAPResponse(SOAPEnvelope):
                 if el_text is not None:
                     reason = el_text.text
 
-            return code, reason
+            el_detail = el_fault.find(SOAPElement.Detail)
+            if el_detail is not None:
+                el_wsman_fault = el_detail.find(WSManFaultElement.WSManFault)
+                if el_wsman_fault is not None:
+                    wsman_code = el_wsman_fault.get("Code")
+
+            return code, reason, wsman_code
         return None
 
     def raise_for_status(self) -> Self:
@@ -70,7 +78,10 @@ class SOAPResponse(SOAPEnvelope):
 
         fault = self.fault
         if fault is not None:
-            raise SOAPFaultError(*fault)
+            soap_code, reason, wsman_code = fault
+            if wsman_code is not None:
+                raise WSManFaultError(soap_code, reason, wsman_code)
+            raise SOAPFaultError(soap_code, reason)
 
         try:
             self.http_response.raise_for_status()

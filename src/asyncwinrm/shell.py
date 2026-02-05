@@ -1,18 +1,18 @@
 import asyncio
 import os
 import stat
+import time
 from base64 import b64encode, b64decode
 from collections.abc import Collection
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePath
 from subprocess import PIPE, STDOUT, DEVNULL
 from typing import Optional, IO, Union, Iterable, TYPE_CHECKING, Callable, cast
 
-import httpx
 from lxml import etree
 
-from .exceptions import ProtocolError, TransportError
+from .exceptions import ProtocolError, TransportError, SOAPFaultError, WSManFaultError
 from .protocol.action import (
     WindowsShellAction,
     WSTransferAction,
@@ -52,7 +52,21 @@ class _OutputSink:
             await self._writer.drain()
             return
         if self._fd is not None:
-            await asyncio.to_thread(os.write, self._fd, data)
+
+            def _write_all(fd: int, payload: bytes) -> None:
+                view = memoryview(payload)
+                offset = 0
+                while offset < len(view):
+                    try:
+                        written = os.write(fd, view[offset:])
+                    except BlockingIOError:
+                        time.sleep(0.01)
+                        continue
+                    if written == 0:
+                        raise BlockingIOError("write returned 0 bytes")
+                    offset += written
+
+            await asyncio.to_thread(_write_all, self._fd, data)
             return
         if self._file is not None:
             writer = cast(Callable[[bytes], int], self._file.write)
@@ -68,10 +82,20 @@ class _OutputSink:
             await asyncio.to_thread(self._file.close)
 
 
-class _StdinWriter:
-    def __init__(self, shell: "Shell", command_id: str):
+class ShellWriter:
+    """Async stdin writer for remote shell commands."""
+
+    def __init__(
+        self,
+        shell: "Shell",
+        command_id: str,
+        done_event: asyncio.Event,
+        chunk_size: Optional[int] = None,
+    ):
         self._shell = shell
         self._command_id = command_id
+        self._done_event = done_event
+        self._chunk_size = chunk_size
         self._queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
         self._closed = False
         self._task = asyncio.create_task(self._send_loop())
@@ -81,7 +105,14 @@ class _StdinWriter:
             raise RuntimeError("stdin is closed")
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError("stdin.write() expects bytes-like data")
-        self._queue.put_nowait(bytes(data))
+        if self._done_event.is_set():
+            return
+        payload = bytes(data)
+        if self._chunk_size is None or self._chunk_size <= 0:
+            self._queue.put_nowait(payload)
+            return
+        for offset in range(0, len(payload), self._chunk_size):
+            self._queue.put_nowait(payload[offset : offset + self._chunk_size])
 
     def writelines(self, lines: Iterable[bytes]) -> None:
         for line in lines:
@@ -105,13 +136,17 @@ class _StdinWriter:
         while True:
             data = await self._queue.get()
             try:
+                if self._done_event.is_set():
+                    if data is None:
+                        return
+                    continue
                 if data is None:
                     try:
-                        await self._shell._send(self._command_id, b"", end=True)
+                        await self._shell._send(self._command_id, b"", end=True, cancel_receive=True)
                     except TransportError:
                         return
                     return
-                await self._shell._send(self._command_id, data)
+                await self._shell._send(self._command_id, data, cancel_receive=True)
             finally:
                 self._queue.task_done()
 
@@ -121,7 +156,7 @@ class Process:
         self,
         shell: "Shell",
         command_id: str,
-        stdin: Optional[_StdinWriter],
+        stdin: Optional[ShellWriter],
         stdout: Optional[asyncio.StreamReader],
         stderr: Optional[asyncio.StreamReader],
         receive_task: asyncio.Task[None],
@@ -187,6 +222,19 @@ class CompletedProcess:
     stderr: Optional[bytes]
 
 
+@dataclass(slots=True)
+class _CommandContext:
+    command_id: str
+    done_event: asyncio.Event = field(default_factory=asyncio.Event)
+    stdin_task: Optional[asyncio.Task[None]] = None
+    receive_cancel: asyncio.Event = field(default_factory=asyncio.Event)
+    receive_idle: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class _ReceiveCancelled(Exception):
+    pass
+
+
 class Shell:
     client: "WinRMClient"
     id: str
@@ -195,6 +243,29 @@ class Shell:
     def __init__(self, client: "WinRMClient", id: str) -> None:
         self.client = client
         self.id = id
+        self._send_lock = asyncio.Lock()
+        self._receive_lock = asyncio.Lock()
+        self._command_contexts: dict[str, _CommandContext] = {}
+
+    def _open_command_context(self, command_id: str) -> _CommandContext:
+        ctx = _CommandContext(command_id=command_id)
+        ctx.receive_idle.set()
+        self._command_contexts[command_id] = ctx
+        return ctx
+
+    def _close_command_context(self, command_id: str) -> None:
+        self._command_contexts.pop(command_id, None)
+
+    @staticmethod
+    def _suppress_task_cancelled(task: asyncio.Task[None]) -> None:
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            return
+
+    @staticmethod
+    def _is_operation_timeout_fault(exc: BaseException) -> bool:
+        return isinstance(exc, WSManFaultError) and exc.wsman_code == "2150858793"
 
     async def destroy(self) -> None:
         if self.destroyed:
@@ -206,7 +277,14 @@ class Shell:
         )
         self.destroyed = True
 
-    async def _command(self, command: str, arguments: Optional[Collection[str]] = None) -> str:
+    async def _command(
+        self,
+        command: str,
+        arguments: Optional[Collection[str]] = None,
+        *,
+        console_mode_stdin: bool = True,
+        skip_cmd_shell: bool = True,
+    ) -> str:
         def _body(el_body: etree.Element) -> None:
             el_cl = etree.SubElement(
                 el_body,
@@ -224,24 +302,37 @@ class Shell:
             resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             selectors={"ShellId": self.id},
             data_element=RemoteShellElement.CommandResponse,
+            options={
+                "WINRS_CONSOLEMODE_STDIN": "TRUE" if console_mode_stdin else "FALSE",
+                "WINRS_SKIP_CMD_SHELL": "TRUE" if skip_cmd_shell else "FALSE",
+            },
         )
         command_id = response.data.findtext(RemoteShellElement.CommandID)
         if not command_id:
             raise ProtocolError("Command response missing CommandId")
         return command_id
 
-    async def create_subprocess_exec(
+    async def spawn(
         self,
-        program: str,
+        command: str,
         *args: str,
         stdin: Optional[ProcessSource] = PIPE,
         stdout: Optional[ProcessTarget] = PIPE,
         stderr: Optional[ProcessTarget] = PIPE,
+        console_mode_stdin: bool = True,
+        skip_cmd_shell: bool = True,
+        stdin_chunk_size: Optional[int] = 65536,
     ) -> Process:
         if self.destroyed:
             raise RuntimeError("Shell has been destroyed")
 
-        command_id = await self._command(program, args)
+        command_id = await self._command(
+            command,
+            args or None,
+            console_mode_stdin=console_mode_stdin,
+            skip_cmd_shell=skip_cmd_shell,
+        )
+        ctx = self._open_command_context(command_id)
         stdout_reader: Optional[asyncio.StreamReader] = None
         stderr_reader: Optional[asyncio.StreamReader] = None
         stdout_sink = None
@@ -267,15 +358,15 @@ class Shell:
         elif stderr is not None:
             stderr_sink = _OutputSink(stderr)
 
-        stdin_writer: Optional[_StdinWriter] = None
+        stdin_writer: Optional[ShellWriter] = None
         stdin_task: Optional[asyncio.Task[None]] = None
         if stdin == PIPE:
-            stdin_writer = _StdinWriter(self, command_id)
+            stdin_writer = ShellWriter(self, command_id, ctx.done_event, stdin_chunk_size)
         elif stdin == DEVNULL:
-            stdin_task = asyncio.create_task(self._send(command_id, b"", end=True))
+            stdin_task = asyncio.create_task(self._send(command_id, b"", end=True, cancel_receive=False))
         elif stdin is not None:
-            stdin_task = asyncio.create_task(self._feed_stdin(command_id, stdin))
-            stdin_task.add_done_callback(lambda t: t.exception())
+            stdin_task = asyncio.create_task(self._feed_stdin(command_id, stdin, ctx.done_event, stdin_chunk_size))
+            stdin_task.add_done_callback(self._suppress_task_cancelled)
 
         returncode_future: asyncio.Future[int] = asyncio.get_event_loop().create_future()
         receive_task = asyncio.create_task(
@@ -286,6 +377,7 @@ class Shell:
                 stdout_sink=stdout_sink,
                 stderr_sink=stderr_sink,
                 returncode_future=returncode_future,
+                context=ctx,
             ),
         )
 
@@ -300,16 +392,8 @@ class Shell:
         )
         if stdin_task is not None:
             process._stdin_task = stdin_task
+            ctx.stdin_task = stdin_task
         return process
-
-    async def create_subprocess_shell(
-        self,
-        command: str,
-        stdin: Optional[ProcessSource] = None,
-        stdout: Optional[ProcessTarget] = None,
-        stderr: Optional[ProcessTarget] = None,
-    ) -> Process:
-        return await self.create_subprocess_exec("cmd.exe", "/c", command, stdin=stdin, stdout=stdout, stderr=stderr)
 
     async def run(
         self,
@@ -327,12 +411,19 @@ class Shell:
         else:
             stdin = None
 
-        proc = await self.create_subprocess_exec(*cmd, stdin=stdin, stdout=stdout, stderr=stderr)
+        proc = await self.spawn(*cmd, stdin=stdin, stdout=stdout, stderr=stderr)
         out, err = await proc.communicate(input=input)
         returncode = await proc.wait()
         return CompletedProcess(args=cmd, returncode=returncode, stdout=out, stderr=err)
 
-    async def _get_events(self, command_id: str, *, stdout: bool, stderr: bool):
+    async def _get_events(
+        self,
+        command_id: str,
+        *,
+        stdout: bool,
+        stderr: bool,
+        context: _CommandContext,
+    ):
         def _body(el_body: etree.Element) -> None:
             el_receive = etree.SubElement(
                 el_body, RemoteShellElement.Receive, nsmap={"rsp": Namespace.WindowsRemoteShell}
@@ -346,13 +437,33 @@ class Shell:
                 desired_stream += " stderr"
             el_desired_stream.text = desired_stream.strip()
 
-        response = await self.client.request(
-            WindowsShellAction.Receive,
-            _body,
-            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
-            selectors={"ShellId": self.id},
-            data_element=RemoteShellElement.ReceiveResponse,
-        )
+        async with self._receive_lock:
+            context.receive_idle.clear()
+            request_task = asyncio.create_task(
+                self.client.request(
+                    WindowsShellAction.Receive,
+                    _body,
+                    resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
+                    selectors={"ShellId": self.id},
+                    data_element=RemoteShellElement.ReceiveResponse,
+                    timeout=1,
+                )
+            )
+            cancel_task = asyncio.create_task(context.receive_cancel.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {request_task, cancel_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancel_task in done and not request_task.done():
+                    request_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await request_task
+                    raise _ReceiveCancelled()
+                response = await request_task
+            finally:
+                cancel_task.cancel()
+                context.receive_idle.set()
         el_receive = response.data
 
         for el in el_receive:
@@ -387,11 +498,13 @@ class Shell:
         stdout_sink: Optional[_OutputSink],
         stderr_sink: Optional[_OutputSink],
         returncode_future: asyncio.Future[int],
+        context: _CommandContext,
     ) -> None:
         done = False
         stdout_finished = False
         stderr_finished = False
         returncode = 0
+        done_seen = False
 
         try:
             while not done:
@@ -400,6 +513,7 @@ class Shell:
                         command_id,
                         stdout=stdout_reader is not None or stdout_sink is not None,
                         stderr=stderr_reader is not None or stderr_sink is not None,
+                        context=context,
                     ):
                         if isinstance(event, StreamEvent):
                             if event.stream == "stdout":
@@ -423,11 +537,18 @@ class Shell:
                         elif isinstance(event, CommandStateEvent):
                             if event.state == CommandState.Done:
                                 done = True
+                                done_seen = True
                                 returncode = event.exit_code or 0
+                                context.done_event.set()
+                                if context.stdin_task is not None:
+                                    context.stdin_task.cancel()
                                 break
-                except httpx.TimeoutException:
-                    await asyncio.sleep(0.05)
-
+                except _ReceiveCancelled:
+                    continue
+                except SOAPFaultError as exc:
+                    if self._is_operation_timeout_fault(exc):
+                        continue
+                    raise
                 if stdout_finished and stderr_finished:
                     done = True
         except Exception as exc:
@@ -438,6 +559,9 @@ class Shell:
             if not returncode_future.done():
                 returncode_future.set_result(returncode)
         finally:
+            if done_seen:
+                with suppress(Exception):
+                    await self._signal(command_id, WindowsShellSignal.Terminate)
             if stdout_reader is not None:
                 stdout_reader.feed_eof()
             if stderr_reader is not None:
@@ -447,8 +571,16 @@ class Shell:
                 await stdout_sink.close()
             if stderr_sink is not None and stderr_sink is not stdout_sink:
                 await stderr_sink.close()
+            self._close_command_context(command_id)
 
-    async def _send(self, command_id: str, data: bytes, *, end: bool = False) -> None:
+    async def _send(
+        self,
+        command_id: str,
+        data: bytes,
+        *,
+        end: bool = False,
+        cancel_receive: bool = True,
+    ) -> None:
         def _body(el_body: etree.Element) -> None:
             el_send = etree.SubElement(el_body, RemoteShellElement.Send, nsmap={"rsp": Namespace.WindowsRemoteShell})
             el_stream = etree.SubElement(el_send, RemoteShellElement.Stream)
@@ -459,12 +591,19 @@ class Shell:
             if data:
                 el_stream.text = b64encode(data).decode("ascii")
 
-        await self.client.request(
-            WindowsShellAction.Send,
-            _body,
-            resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
-            selectors={"ShellId": self.id},
-        )
+        context = self._command_contexts.get(command_id)
+        if cancel_receive and context is not None:
+            context.receive_cancel.set()
+            await context.receive_idle.wait()
+            context.receive_cancel.clear()
+
+        async with self._send_lock:
+            await self.client.request(
+                WindowsShellAction.Send,
+                _body,
+                resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
+                selectors={"ShellId": self.id},
+            )
 
     async def _signal(self, command_id: str, signal: WindowsShellSignal) -> None:
         def _body(el_body: etree.Element) -> None:
@@ -481,17 +620,26 @@ class Shell:
             selectors={"ShellId": self.id},
         )
 
-    async def _feed_stdin(self, command_id: str, source: ProcessSource) -> None:
+    async def _feed_stdin(
+        self,
+        command_id: str,
+        source: ProcessSource,
+        done_event: asyncio.Event,
+        chunk_size: Optional[int],
+    ) -> None:
         if source in (PIPE, STDOUT, DEVNULL):
             raise ValueError("Invalid stdin source")
-        read_size = 65536
+        read_size = 65536 if not chunk_size or chunk_size <= 0 else chunk_size
         if isinstance(source, asyncio.StreamReader):
             while True:
+                if done_event.is_set():
+                    return
                 chunk = await source.read(read_size)
                 if not chunk:
                     break
-                await self._send(command_id, chunk)
-            await self._send(command_id, b"", end=True)
+                await self._send(command_id, chunk, cancel_receive=False)
+            if not done_event.is_set():
+                await self._send(command_id, b"", end=True, cancel_receive=False)
             return
 
         fd: Optional[int] = None
@@ -566,18 +714,22 @@ class Shell:
                 _enable_reader()
                 try:
                     while True:
+                        if done_event.is_set():
+                            return
                         item = await queue.get()
                         if item is None:
                             break
                         if isinstance(item, BaseException):
                             raise item
-                        await self._send(command_id, cast(bytes, item))
+                        await self._send(command_id, cast(bytes, item), cancel_receive=False)
                         if not reader_active:
                             _enable_reader()
                 finally:
                     _disable_reader()
             elif fd is not None:
                 while True:
+                    if done_event.is_set():
+                        return
                     try:
                         chunk = await asyncio.to_thread(os.read, fd, read_size)
                     except BlockingIOError:
@@ -585,15 +737,18 @@ class Shell:
                         continue
                     if not chunk:
                         break
-                    await self._send(command_id, chunk)
+                    await self._send(command_id, chunk, cancel_receive=False)
             else:
                 while True:
+                    if done_event.is_set():
+                        return
                     chunk = await asyncio.to_thread(file_obj.read, read_size)
                     if not chunk:
                         break
-                    await self._send(command_id, chunk)
+                    await self._send(command_id, chunk, cancel_receive=False)
         finally:
             with suppress(Exception):
                 if hasattr(file_obj, "close"):
                     await asyncio.to_thread(file_obj.close)
-        await self._send(command_id, b"", end=True)
+        if not done_event.is_set():
+            await self._send(command_id, b"", end=True, cancel_receive=False)

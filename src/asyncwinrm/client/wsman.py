@@ -18,6 +18,9 @@ from ..protocol.xml.element import (
 )
 from ..protocol.xml.attribute import XMLAttribute, SOAPAttribute
 from ..protocol.xml.namespace import Namespace
+import logging
+
+from ..utils import DurationLike, sec_to_duration
 
 type Builder = Callable[[etree.Element], None]
 
@@ -316,12 +319,13 @@ class WSManagementIdentifyResponse(WSManagementResponse):
 class WSManagementClient:
     """WS-Management client"""
 
-    __slots__ = ("_soap", "endpoint", "locale", "timeout", "max_envelope_size")
+    __slots__ = ("_logger", "_soap", "endpoint", "locale", "timeout", "max_envelope_size")
 
+    _logger: logging.Logger
     _soap: SOAPClient
     endpoint: httpx.URL
     locale: Optional[str]
-    timeout: Optional[int]
+    timeout: Optional[DurationLike]
     max_envelope_size: Optional[int]
 
     def __init__(
@@ -330,9 +334,10 @@ class WSManagementClient:
         endpoint: httpx.URL,
         *,
         locale: Optional[str] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[DurationLike] = None,
         max_envelope_size: Optional[int] = None,
     ):
+        self._logger = logging.getLogger(__name__)
         self._soap = SOAPClient(client)
         self.endpoint = endpoint
         self.locale = locale
@@ -367,7 +372,7 @@ class WSManagementClient:
         selectors: Optional[dict[str, str]] = None,
         options: Optional[dict[str, str]] = None,
         locale: Optional[str] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[DurationLike] = None,
         max_size: Optional[int] = None,
     ) -> WSManagementEnvelope:
         """
@@ -403,7 +408,7 @@ class WSManagementClient:
             timeout = self.timeout
 
         if timeout is not None:
-            envelope.timeout = f"PT{str(timeout)}S"
+            envelope.timeout = sec_to_duration(timeout)
 
         envelope.max_size = max_size or self.max_envelope_size
 
@@ -442,7 +447,7 @@ class WSManagementClient:
         selectors: Optional[dict[str, str]] = None,
         options: Optional[dict[str, str]] = None,
         locale: Optional[str] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[DurationLike] = None,
         max_size: Optional[int] = None,
     ) -> WSManagementResponse:
         """
@@ -473,6 +478,7 @@ class WSManagementClient:
             max_size=max_size,
         )
 
+        self._logger.info("request action=%s resource_uri=%s", action, resource_uri)
         return await self.run_request(envelope, data_element)
 
     async def get(

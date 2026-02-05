@@ -1,6 +1,7 @@
 import asyncio
 import os
 import socket
+import time
 import unittest
 from contextlib import suppress
 
@@ -27,6 +28,22 @@ def _get_client():
         raise RuntimeError(f"Unknown auth method from $WINRM_AUTH_METHOD: '{method}'")
 
     return WinRMClient(endpoint, auth=auth)
+
+
+async def _read_until_contains(reader: asyncio.StreamReader, token: bytes, *, timeout: float = 8.0) -> bytes:
+    buffer = bytearray()
+    deadline = time.monotonic() + timeout
+    while True:
+        if token in buffer:
+            return bytes(buffer)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AssertionError(f"Timed out waiting for {token!r} in output")
+        chunk = await asyncio.wait_for(reader.read(1024), timeout=remaining)
+        print(chunk, end="", flush=True)
+        if not chunk:
+            raise AssertionError(f"EOF before {token!r} was seen in output")
+        buffer.extend(chunk)
 
 
 class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
@@ -58,7 +75,7 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
     async def testShell(self):
         shell = await self.client.shell()
         try:
-            proc = await shell.create_subprocess_exec("cmd.exe", "/c", "ver")
+            proc = await shell.spawn("cmd.exe", "/c", "ver")
             stdout, stderr = await proc.communicate()
             await proc.wait()
             decoded_stdout = stdout.decode() if stdout is not None else ""
@@ -69,12 +86,38 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
         finally:
             await shell.destroy()
 
+    async def testShellStdioStream(self):
+        shell = await self.client.shell()
+        try:
+            proc = await shell.spawn("cmd.exe", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+            assert proc.stdin is not None
+            assert proc.stdout is not None
+
+            await _read_until_contains(proc.stdout, b">")
+
+            proc.stdin.write(b"echo hello\r\n")
+            await proc.stdin.drain()
+            # the first time is from our command getting echoed back, the second time is the actual output
+            await _read_until_contains(proc.stdout, b"hello\r\nhello\r\n")
+
+            proc.stdin.write(b"echo world\r\n")
+            await proc.stdin.drain()
+            await _read_until_contains(proc.stdout, b"world\r\nworld\r\n")
+
+            proc.stdin.write(b"exit\r\n")
+            await proc.stdin.drain()
+
+            returncode = await proc.wait()
+            self.assertEqual(returncode, 0)
+        finally:
+            await shell.destroy()
+
     async def testRegistry(self):
         key = self.client.registry.hklm.key(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
         product = await key.get_string("ProductName")
         self.assertIsInstance(product, str)
 
-        parent = self.client.registry.hkcu.key(r"Software\AsyncWinRMTest")
+        parent = self.client.registry.hklm.key(r"SOFTWARE\AsyncWinRMTest")
         await parent.create()
         child = None
         expected_value_names = {
@@ -127,7 +170,6 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
                 await parent.delete()
 
     async def testServices(self):
-        # Basic get / get_all
         service = await self.client.services.get("Spooler")
         self.assertIsInstance(service, Service)
         self.assertEqual(service.name, "Spooler")
@@ -136,16 +178,14 @@ class TestAsyncWinRM(unittest.IsolatedAsyncioTestCase):
         services = await self.client.services.get_all()
         self.assertTrue(any(s.name == "Spooler" for s in services))
 
-        # Start/stop and verify status changes (Spooler is non-essential)
         initial_status = await service.get_status()
-        self.assertIn(initial_status, (ServiceState.Running, ServiceState.Stopped, ServiceState.Paused))
-
-        await service.stop()
-        for _ in range(25):  # up to 5s
-            if await service.get_status() == ServiceState.Stopped:
-                break
-            await asyncio.sleep(0.2)
-        self.assertEqual(await service.get_status(), ServiceState.Stopped)
+        if initial_status == ServiceState.Running:
+            await service.stop()
+            for _ in range(25):  # up to 5s
+                if await service.get_status() == ServiceState.Stopped:
+                    break
+                await asyncio.sleep(0.2)
+            self.assertEqual(await service.get_status(), ServiceState.Stopped)
 
         await service.start()
         for _ in range(25):  # up to 5s

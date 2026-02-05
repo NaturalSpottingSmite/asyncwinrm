@@ -19,6 +19,7 @@ from ..protocol.xml.element import (
     WMIElement,
 )
 from ..protocol.xml.namespace import Namespace
+from ..utils import DurationLike, sec_to_duration
 from asyncwinrm.wmi.registry import Registry
 from asyncwinrm.wmi.services import Services
 
@@ -199,7 +200,11 @@ class WinRMClient(WSManagementClient):
         stdin: bool = True,
         stdout: bool = True,
         stderr: bool = True,
-        lifetime: Optional[int] = None,
+        lifetime: Optional[DurationLike] = None,
+        *,
+        noprofile: bool = False,
+        codepage: int = 437,
+        idle_timeout: Optional[DurationLike] = None,
     ) -> Shell:
         body = etree.Element(RemoteShellElement.Shell, nsmap={"rsp": Namespace.WindowsRemoteShell})
 
@@ -225,13 +230,22 @@ class WinRMClient(WSManagementClient):
         etree.SubElement(body, RemoteShellElement.OutputStreams).text = output_streams.strip()
 
         if lifetime is not None:
-            etree.SubElement(body, RemoteShellElement.Lifetime).text = f"PT{lifetime}S"
+            etree.SubElement(body, RemoteShellElement.Lifetime).text = sec_to_duration(lifetime)
+
+        if idle_timeout is not None:
+            etree.SubElement(body, RemoteShellElement.IdleTimeOut).text = sec_to_duration(idle_timeout)
+
+        options = {
+            "WINRS_NOPROFILE": "TRUE" if noprofile else "FALSE",
+            "WINRS_CODEPAGE": str(codepage),
+        }
 
         response = await self.request(
             WSTransferAction.Create,
             body,
             resource_uri=f"{Namespace.WindowsRemoteShell}/cmd",
             data_element=WSTransferElement.ResourceCreated,
+            options=options,
         )
 
         el_reference_parameters = response.data.find(WSAddressingElement.ReferenceParameters)
